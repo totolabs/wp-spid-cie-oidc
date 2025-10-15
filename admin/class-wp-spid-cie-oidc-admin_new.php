@@ -12,12 +12,10 @@ class WP_SPID_CIE_OIDC_Admin {
 
     private $plugin_name;
     private $version;
-    private $keys_option_name; // Nuovo: nome dedicato per l'opzione delle chiavi
 
     public function __construct( $plugin_name, $version ) {
         $this->plugin_name = $plugin_name;
         $this->version = $version;
-        $this->keys_option_name = $plugin_name . '_keys'; // Definiamo il nome del nuovo contenitore
 
         add_action( 'admin_menu', array( $this, 'add_options_page' ) );
         add_action( 'admin_init', array( $this, 'register_settings' ) );
@@ -86,14 +84,10 @@ class WP_SPID_CIE_OIDC_Admin {
                 $jwkPublicKeyArray['alg'] = 'RS256';
                 $jwkPublicKeyArray['use'] = 'sig';
 
-                // Creiamo un array dedicato solo alle chiavi
-                $keys_data = [
-                    'oidc_public_key_jwk' => json_encode($jwkPublicKeyArray, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES),
-                    'oidc_private_key_pem' => (string)$privateKey,
-                ];
-
-                // Salviamo le chiavi nel LORO contenitore dedicato, bypassando il conflitto.
-                update_option($this->keys_option_name, $keys_data);
+                $options = get_option($this->plugin_name . '_options', []);
+                $options['oidc_public_key_jwk'] = json_encode($jwkPublicKeyArray, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+                $options['oidc_private_key_pem'] = (string)$privateKey;
+                update_option($this->plugin_name . '_options', $options);
             }
 			
             wp_redirect(admin_url('options-general.php?page=' . $this->plugin_name . '&keys-generated=true'));
@@ -105,9 +99,8 @@ class WP_SPID_CIE_OIDC_Admin {
      * Mostra l'interfaccia per la gestione delle chiavi.
      */
     public function render_keys_field() {
-        // Leggiamo le chiavi dal LORO contenitore dedicato.
-        $keys_options = get_option($this->keys_option_name);
-        $public_key = $keys_options['oidc_public_key_jwk'] ?? '';
+        $options = get_option($this->plugin_name . '_options');
+        $public_key = $options['oidc_public_key_jwk'] ?? '';
         $generation_url = wp_nonce_url(admin_url('options-general.php?page=' . $this->plugin_name . '&action=generate_oidc_keys'), 'generate_oidc_keys_nonce');
 
         if (isset($_GET['keys-generated']) && $_GET['keys-generated'] === 'true') {
@@ -172,12 +165,16 @@ class WP_SPID_CIE_OIDC_Admin {
     
 	/**
      * Sanifica i dati in input prima di salvarli nel database.
-     * Questa funzione ora gestisce SOLO i campi del form.
+     * CORREZIONE: Questa funzione ora preserva i dati esistenti e aggiorna solo quelli inviati dal form,
+     * risolvendo il conflitto che cancellava le chiavi generate.
      */	
     public function sanitize_options( $input ) {
-        $new_input = [];
+        // Parte sempre dai valori già salvati nel database per non perderli.
+        $new_input = get_option( $this->plugin_name . '_options', [] );
 
+        // Controlla se l'input proviene effettivamente dal form principale (non è nullo e è un array).
         if ( is_array($input) ) {
+            // Sanifica e aggiorna solo i campi di testo che arrivano dal form.
             $fields = ['spid_client_id', 'spid_client_secret', 'cie_client_id', 'cie_client_secret'];
             foreach ( $fields as $field ) { 
                 if ( isset( $input[$field] ) ) { 
@@ -185,6 +182,7 @@ class WP_SPID_CIE_OIDC_Admin {
                 } 
             }
             
+            // Sanifica e aggiorna solo le checkbox che arrivano dal form.
             $checkboxes = ['spid_enabled', 'cie_enabled'];
             foreach ( $checkboxes as $checkbox ) {
                 // Se la checkbox è presente nell'input del form, il suo valore è '1', altrimenti va impostato a '0'.
