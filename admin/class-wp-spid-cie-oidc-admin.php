@@ -10,57 +10,32 @@
  */
 class WP_SPID_CIE_OIDC_Admin {
 
-    /**
-     * L'ID di questo plugin.
-     * @var      string    $plugin_name
-     */
     private $plugin_name;
-
-    /**
-     * La versione di questo plugin.
-     * @var      string    $version
-     */
     private $version;
 
-    /**
-     * Inizializza la classe e imposta le sue proprietà.
-     *
-     * @param      string    $plugin_name       Il nome del plugin.
-     * @param      string    $version    La versione del plugin.
-     */
     public function __construct( $plugin_name, $version ) {
-
         $this->plugin_name = $plugin_name;
         $this->version = $version;
 
-        // Hook per aggiungere la pagina delle opzioni
         add_action( 'admin_menu', array( $this, 'add_options_page' ) );
-
-        // Hook per registrare le impostazioni
         add_action( 'admin_init', array( $this, 'register_settings' ) );
     }
 
-    /**
-     * Aggiunge la pagina di opzioni nel menu di amministrazione.
-     */
     public function add_options_page() {
         add_options_page(
-            'Impostazioni SPID/CIE OIDC', // Titolo della pagina
-            'SPID/CIE OIDC',             // Titolo nel menu
-            'manage_options',            // Capability richiesta
-            $this->plugin_name,          // Slug della pagina
-            array( $this, 'create_admin_page' ) // Funzione che renderizza la pagina
+            'Impostazioni SPID/CIE OIDC',
+            'SPID/CIE OIDC',
+            'manage_options',
+            $this->plugin_name,
+            array( $this, 'create_admin_page' )
         );
     }
 
-    /**
-     * Crea la pagina di amministrazione.
-     */
     public function create_admin_page() {
         ?>
         <div class="wrap">
             <h2>Impostazioni SPID & CIE OIDC Login</h2>
-            <p>Configura qui le credenziali per l'autenticazione tramite OpenID Connect.</p>
+            <p>Configura qui le credenziali e gli endpoint per l'autenticazione tramite OpenID Connect.</p>
             <form method="post" action="options.php">
                 <?php
                 settings_fields( $this->plugin_name . '_options_group' );
@@ -73,17 +48,19 @@ class WP_SPID_CIE_OIDC_Admin {
     }
 
     /**
-     * Registra le impostazioni, le sezioni e i campi.
+     * Registra tutte le impostazioni, sezioni e campi.
      */
     public function register_settings() {
-        // Registra il gruppo di impostazioni
+        $option_group = $this->plugin_name . '_options_group';
+        $option_name = $this->plugin_name . '_options';
+
         register_setting(
-            $this->plugin_name . '_options_group', // Nome del gruppo
-            $this->plugin_name . '_options',       // Nome dell'opzione nel database
-            array( $this, 'sanitize_options' )    // Funzione di sanificazione (per sicurezza)
+            $option_group,
+            $option_name,
+            array( $this, 'sanitize_options' )
         );
 
-        // Sezione per SPID
+        // --- SEZIONE SPID ---
         add_settings_section(
             'spid_section',
             'Impostazioni SPID',
@@ -91,51 +68,86 @@ class WP_SPID_CIE_OIDC_Admin {
             $this->plugin_name
         );
 
-        // Campo SPID Client ID
-        add_settings_field(
-            'spid_client_id',
-            'SPID Client ID',
-            array( $this, 'spid_client_id_callback' ),
-            $this->plugin_name,
-            'spid_section'
+        add_settings_field('spid_enabled', 'Abilita SPID', array( $this, 'render_checkbox_field' ), $this->plugin_name, 'spid_section', ['id' => 'spid_enabled']);
+        add_settings_field('spid_client_id', 'SPID Client ID', array( $this, 'render_text_field' ), $this->plugin_name, 'spid_section', ['id' => 'spid_client_id']);
+        add_settings_field('spid_client_secret', 'SPID Client Secret', array( $this, 'render_text_field' ), $this->plugin_name, 'spid_section', ['id' => 'spid_client_secret', 'type' => 'password']);
+        add_settings_field('spid_metadata_url', 'URL Metadati SPID', array( $this, 'render_text_field' ), $this->plugin_name, 'spid_section', ['id' => 'spid_metadata_url', 'placeholder' => 'https://registry.spid.gov.it/openid-providers/']);
+
+        // --- SEZIONE CIE ---
+        add_settings_section(
+            'cie_section',
+            'Impostazioni CIE',
+            array( $this, 'print_cie_section_info' ),
+            $this->plugin_name
         );
 
-        // Aggiungi qui altri campi se necessario (es. Client Secret, URL metadati, etc.)
-
+        add_settings_field('cie_enabled', 'Abilita CIE', array( $this, 'render_checkbox_field' ), $this->plugin_name, 'cie_section', ['id' => 'cie_enabled']);
+        add_settings_field('cie_client_id', 'CIE Client ID', array( $this, 'render_text_field' ), $this->plugin_name, 'cie_section', ['id' => 'cie_client_id']);
+        add_settings_field('cie_client_secret', 'CIE Client Secret', array( $this, 'render_text_field' ), $this->plugin_name, 'cie_section', ['id' => 'cie_client_secret', 'type' => 'password']);
+        add_settings_field('cie_metadata_url', 'URL Metadati CIE', array( $this, 'render_text_field' ), $this->plugin_name, 'cie_section', ['id' => 'cie_metadata_url', 'placeholder' => 'https://preproduzione.id.cie.gov.it/.well-known/openid-federation']);
     }
 
     /**
-     * Sanifica ogni impostazione prima di salvarla nel database.
-     * @param array $input Contiene tutte le impostazioni da sanificare.
-     * @return array L'array sanificato.
+     * Funzioni "callback" per renderizzare i campi (DRY - Don't Repeat Yourself)
+     */
+    public function render_text_field( $args ) {
+        $options = get_option( $this->plugin_name . '_options' );
+        $id = $args['id'];
+        $type = isset($args['type']) ? $args['type'] : 'text';
+        $placeholder = isset($args['placeholder']) ? $args['placeholder'] : '';
+        printf(
+            '<input type="%s" id="%s" name="%s[%s]" value="%s" class="regular-text" placeholder="%s" />',
+            esc_attr($type),
+            esc_attr($id),
+            esc_attr( $this->plugin_name . '_options' ),
+            esc_attr($id),
+            isset( $options[$id] ) ? esc_attr( $options[$id] ) : '',
+            esc_attr($placeholder)
+        );
+    }
+    
+    public function render_checkbox_field( $args ) {
+        $options = get_option( $this->plugin_name . '_options' );
+        $id = $args['id'];
+        $checked = isset( $options[$id] ) && $options[$id] === '1' ? 'checked' : '';
+        printf(
+            '<input type="checkbox" id="%s" name="%s[%s]" value="1" %s />',
+            esc_attr($id),
+            esc_attr( $this->plugin_name . '_options' ),
+            esc_attr($id),
+            $checked
+        );
+    }
+
+    /**
+     * Funzioni "callback" per le descrizioni delle sezioni
+     */
+    public function print_spid_section_info() {
+        print 'Inserisci le credenziali fornite da AgID per la federazione OIDC SPID. L\'URL dei metadati di produzione è solitamente `https://registry.spid.gov.it/openid-providers/`.';
+    }
+
+    public function print_cie_section_info() {
+        print 'Inserisci le credenziali fornite dal Ministero dell\'Interno per la federazione OIDC CIE. L\'URL dei metadati di pre-produzione è `https://preproduzione.id.cie.gov.it/.well-known/openid-federation`.';
+    }
+    
+    /**
+     * Sanifica tutte le opzioni prima di salvarle.
      */
     public function sanitize_options( $input ) {
         $new_input = array();
-        if ( isset( $input['spid_client_id'] ) ) {
-            $new_input['spid_client_id'] = sanitize_text_field( $input['spid_client_id'] );
+        $fields = ['spid_client_id', 'spid_client_secret', 'spid_metadata_url', 'cie_client_id', 'cie_client_secret', 'cie_metadata_url'];
+        $checkboxes = ['spid_enabled', 'cie_enabled'];
+
+        foreach ( $fields as $field ) {
+            if ( isset( $input[$field] ) ) {
+                $new_input[$field] = sanitize_text_field( $input[$field] );
+            }
         }
-        // Aggiungi qui la sanificazione per gli altri campi
+        
+        foreach ( $checkboxes as $checkbox ) {
+            $new_input[$checkbox] = ( isset( $input[$checkbox] ) && $input[$checkbox] === '1' ) ? '1' : '0';
+        }
 
         return $new_input;
     }
-
-    /**
-     * Stampa le informazioni per la sezione SPID.
-     */
-    public function print_spid_section_info() {
-        print 'Inserisci le credenziali fornite dal portale di federazione di AgID:';
-    }
-
-    /**
-     * Callback per il campo SPID Client ID.
-     */
-    public function spid_client_id_callback() {
-        $options = get_option( $this->plugin_name . '_options' );
-        printf(
-            '<input type="text" id="spid_client_id" name="%s[spid_client_id]" value="%s" class="regular-text" />',
-            esc_attr( $this->plugin_name . '_options' ),
-            isset( $options['spid_client_id'] ) ? esc_attr( $options['spid_client_id'] ) : ''
-        );
-    }
-
-} // Fine classe
+}
