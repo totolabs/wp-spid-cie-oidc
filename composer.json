@@ -1,0 +1,15 @@
+{
+    "name": "totolabs/wp-spid-cie-oidc",
+    "description": "Plugin WordPress per l'autenticazione tramite SPID e CIE con protocollo OpenID Connect.",
+    "type": "wordpress-plugin",
+    "license": "GPL-2.0-or-later",
+    "authors": [
+        {
+            "name": "Totolabs Srl",
+            "email": "info@totolabs.it"
+        }
+    ],
+    "require": {
+        "jumbojett/openid-connect-php": "^1.0"
+    }
+}
