@@ -1,0 +1,30 @@
+/**
+ * Stili per l'area pubblica del plugin SPID/CIE OIDC Login.
+ *
+ * @since      0.1.0
+ */
+.spid-cie-container {
+    margin: 20px 0;
+    padding-top: 20px;
+    border-top: 1px solid #ddd;
+    text-align: center;
+}
+
+.spid-cie-button {
+    display: block !important;
+    width: 100%;
+    margin-bottom: 10px !important;
+    text-align: center;
+    box-sizing: border-box;
+}
+
+/* Colori ufficiali */
+.spid-button {
+    background-color: #0066CC !important;
+    border-color: #005ab3 !important;
+}
+
+.cie-button {
+    background-color: #0055A4 !important;
+    border-color: #004482 !important;
+}
