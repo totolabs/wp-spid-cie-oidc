@@ -42,15 +42,18 @@ class WP_SPID_CIE_OIDC {
     }
 
     /**
-     * Carica le dipendenze richieste dal plugin.
-     *
+	 * Carica le dipendenze richieste dal plugin.
+	 *
      * @since    0.1.0
-     * @access   private
-     */
-    private function load_dependencies() {
-        // Qui caricheremo i file per l'area admin e l'area pubblica.
-        // Per ora è vuoto.
-    }
+	 */
+	private function load_dependencies() {
+		/**
+		 * La classe responsabile di tutte le azioni e i filtri dell'area admin.
+		 */
+		require_once plugin_dir_path( dirname( __FILE__ ) ) . 'admin/class-wp-spid-cie-oidc-admin.php';
+
+		// Qui in futuro caricheremo anche i file per l'area pubblica.
+	}
 
     /**
      * Definisce le azioni di internazionalizzazione.
@@ -81,7 +84,7 @@ class WP_SPID_CIE_OIDC {
      * @since    0.1.0
      */
     public function run() {
-        // Qui avvieremo l'ascolto degli "hooks" di WordPress.
-        // Per ora è vuoto.
-    }
+		// Crea l'oggetto per l'area di amministrazione e avvia i suoi hooks.
+		$plugin_admin = new WP_SPID_CIE_OIDC_Admin( $this->plugin_name, $this->version );
+	}
 }
