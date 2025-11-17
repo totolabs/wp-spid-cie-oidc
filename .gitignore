@@ -48,4 +48,4 @@ wp-config.php
 #/wp-content/themes
 
 #OIDC library
-/vendor/
+#/vendor/
