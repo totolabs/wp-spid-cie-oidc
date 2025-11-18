@@ -10,6 +10,6 @@
         }
     ],
     "require": {
-        "jumbojett/openid-connect-php": "^1.0"
-    }
+		"italia/spid-cie-oidc-php": "^1.0"
+	}
 }

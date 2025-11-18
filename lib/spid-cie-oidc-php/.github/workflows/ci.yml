@@ -1,0 +1,68 @@
+name: Setup Check CI 
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+  workflow_dispatch:
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: 7.4
+
+    - name: Validate composer.json and composer.lock
+      run: composer validate
+
+    - name: Cache Composer packages
+      id: composer-cache
+      uses: actions/cache@v2
+      with:
+        path: vendor
+        key: ${{ runner.os }}-php-${{ hashFiles('**/composer.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-php-
+      
+    - name: Install dependencies
+      run: composer install --prefer-dist --no-progress
+
+    - name: Run PHP Code Sniffer
+      run: php vendor/bin/phpcs --ignore=*/spid-sp-access-button/* --standard=PSR12 --warning-severity=0 lib www
+      
+    - name: Execute unit tests and create code coverage report
+      run: phpdbg -qrr ./vendor/bin/phpunit --coverage-clover phpunit-clover.xml --coverage-text --coverage-html code_coverage_report
+      
+    - name: Archive code coverage results
+      uses: actions/upload-artifact@v3
+      with:
+        name: testphp-code-coverage-report
+        path: code_coverage_report
+        retention-days: 3
+      
+    - name: Echo coverage score
+      run: echo $(php vendor/bin/coverage-check phpunit-clover.xml 90 --only-percentage)
+      
+    - name: Grab coverage score
+      run: echo CODE_COVERAGE_RESULT=$(php vendor/bin/coverage-check phpunit-clover.xml 90 --only-percentage) >> $GITHUB_ENV
+      
+    - name: Create code coverage badge
+      uses: schneegans/dynamic-badges-action@v1.2.0
+      with:
+        auth: ${{ secrets.GIST_SECRET }}
+        gistID: f6982180cd9872afb7975f38524cc177
+        filename: spid-cie-oidc-php-dynamic-code-coverage-badge.json
+        label: Test Coverage
+        message: ${{ env.CODE_COVERAGE_RESULT }}
+        color: green
+        
+    - name: Check code coverage score
+      run: php vendor/bin/coverage-check phpunit-clover.xml 0
