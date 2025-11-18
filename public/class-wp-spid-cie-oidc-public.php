@@ -17,16 +17,32 @@ class WP_SPID_CIE_OIDC_Public {
         $this->plugin_name = $plugin_name;
         $this->version = $version;
 
-        // Bottoni di login
+        // Shortcode per pagine custom
         add_shortcode('spid_cie_login', array($this, 'render_login_buttons'));
-        add_action( 'login_form', array( $this, 'render_login_buttons' ) );
         
-        // Gestione Endpoint di Federazione
+        // Hook per la pagina di login standard (wp-login.php)
+        // 'login_message' è il punto standard sopra il form.
+        add_action( 'login_message', array( $this, 'print_login_buttons_on_login_page' ) );
+
+        // Caricamento stili
+        add_action( 'login_enqueue_scripts', array( $this, 'enqueue_styles' ) );
+        add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_styles' ) );
+
+        // Endpoints e Login Flow
         add_action( 'init', array( $this, 'setup_federation_endpoints' ) );
         add_action( 'template_redirect', array( $this, 'serve_federation_endpoints' ) );
-
-        // Gestione Flusso Login
         add_action( 'template_redirect', array( $this, 'handle_login_flow' ) );
+    }
+
+    public function enqueue_styles() {
+		// Carichiamo il file CSS esterno
+        wp_enqueue_style(
+            $this->plugin_name,
+            plugin_dir_url( __FILE__ ) . 'css/wp-spid-cie-oidc-public.css',
+            array(),
+            $this->version, // Versione legata al plugin (Cache friendly)
+            'all'
+        );
     }
 
     public function setup_federation_endpoints() {
@@ -47,7 +63,6 @@ class WP_SPID_CIE_OIDC_Public {
 
         if ( ! $action ) return;
 
-        // Carica la Factory
         if (!class_exists('WP_SPID_CIE_OIDC_Factory')) {
             require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/class-wp-spid-cie-oidc-factory.php';
         }
@@ -55,15 +70,12 @@ class WP_SPID_CIE_OIDC_Public {
         try {
             $client = WP_SPID_CIE_OIDC_Factory::get_client();
 
-            // Entity Statement (JWS)
             if ( $action === 'config' ) {
                 $jws = $client->getEntityStatement();
-                // Header corretto per OIDC Federation
                 header('Content-Type: application/entity-statement+jwt');
                 echo $jws;
                 exit;
             } 
-            // JWKS (Chiavi pubbliche JSON)
             elseif ( $action === 'jwks' ) {
                 $jwks = $client->getJwks();
                 header('Content-Type: application/json');
@@ -78,14 +90,78 @@ class WP_SPID_CIE_OIDC_Public {
 
     public function handle_login_flow() {
         $action = isset($_GET['oidc_action']) ? $_GET['oidc_action'] : get_query_var('oidc_action');
-        if ( ! $action ) return;
+        $provider = isset($_GET['provider']) ? $_GET['provider'] : get_query_var('provider');
+        
+        if ( $action !== 'login' || ! $provider ) return;
 
-        // Qui implementeremo il login nel prossimo step
-        // Per ora lasciamo vuoto per testare prima l'Entity Statement
+        if (!class_exists('WP_SPID_CIE_OIDC_Factory')) {
+            require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/class-wp-spid-cie-oidc-factory.php';
+        }
+
+        try {
+            $client = WP_SPID_CIE_OIDC_Factory::get_client();
+            
+            // Trust Anchors (Ambienti di test/produzione)
+            $trust_anchor = ($provider === 'cie') 
+                ? 'https://preproduzione.id.cie.gov.it/' 
+                : 'https://registry.spid.gov.it/';
+
+            $auth_url = $client->getAuthorizationUrl($trust_anchor);
+            
+            wp_redirect($auth_url);
+            exit;
+
+        } catch (Exception $e) {
+            wp_die("Errore durante l'avvio del login: " . esc_html($e->getMessage()));
+        }
+    }
+
+    public function print_login_buttons_on_login_page($message) {
+        // Se $message non è vuoto (ci sono errori di login), stampiamo prima quelli
+        if (!empty($message)) {
+            echo $message;
+        }
+        
+        // Stampiamo i bottoni
+        echo $this->render_login_buttons();
+        
+        // Ritorniamo null per non stampare due volte il message se siamo nel filtro
+        return null;
     }
 
     public function render_login_buttons() {
-        // Rendering pulsanti (semplificato per ora)
-        return '<div class="spid-cie-buttons"></div>';
+        // CORREZIONE NOME VARIABILE DATABASE
+        $options = get_option( $this->plugin_name . '_options' ); 
+        
+        $spid_enabled = isset($options['spid_enabled']) && $options['spid_enabled'] === '1';
+        $cie_enabled = isset($options['cie_enabled']) && $options['cie_enabled'] === '1';
+
+        if ( ! $spid_enabled && ! $cie_enabled ) {
+            return '';
+        }
+
+        $base_url = home_url('/');
+        $login_url_spid = add_query_arg(['oidc_action' => 'login', 'provider' => 'spid'], $base_url);
+        $login_url_cie  = add_query_arg(['oidc_action' => 'login', 'provider' => 'cie'], $base_url);
+
+        ob_start();
+        ?>
+        <div class="spid-cie-container">
+            <span class="spid-cie-title">Accedi con Identità Digitale</span>
+            
+            <?php if ($spid_enabled): ?>
+                <a href="<?php echo esc_url($login_url_spid); ?>" class="spid-cie-button spid-button">
+                    Entra con SPID
+                </a>
+            <?php endif; ?>
+
+            <?php if ($cie_enabled): ?>
+                <a href="<?php echo esc_url($login_url_cie); ?>" class="spid-cie-button cie-button">
+                    Entra con CIE
+                </a>
+            <?php endif; ?>
+        </div>
+        <?php
+        return ob_get_clean();
     }
 }

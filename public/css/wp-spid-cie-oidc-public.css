@@ -3,28 +3,62 @@
  *
  * @since      0.1.0
  */
+
+/* Contenitore principale */
 .spid-cie-container {
     margin: 20px 0;
-    padding-top: 20px;
-    border-top: 1px solid #ddd;
+    padding: 15px;
+    border: 1px solid #ddd;
+    background-color: #f9f9f9;
+    border-radius: 4px;
     text-align: center;
+    box-sizing: border-box;
+    width: 100%;
+    clear: both;
 }
 
+/* Titolo opzionale */
+.spid-cie-title {
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+    color: #444;
+    margin-bottom: 15px;
+}
+
+/* Stile Bottoni Unificato */
 .spid-cie-button {
     display: block !important;
     width: 100%;
-    margin-bottom: 10px !important;
+    max-width: 320px; /* Larghezza ottimale per login */
+    margin: 0 auto 12px auto !important; /* Spaziatura verticale */
+    padding: 12px 0 !important; /* Altezza interna maggiore */
+    text-decoration: none !important;
+    color: white !important;
+    font-weight: 700 !important;
+    font-size: 16px !important;
+    border-radius: 4px;
     text-align: center;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    transition: all 0.2s ease-in-out;
+    line-height: 1.4;
     box-sizing: border-box;
+    cursor: pointer;
 }
 
-/* Colori ufficiali */
+.spid-cie-button:hover {
+    opacity: 0.9;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+}
+
+/* Colori Ufficiali */
 .spid-button {
     background-color: #0066CC !important;
-    border-color: #005ab3 !important;
+    border: 1px solid #005ab3 !important;
 }
 
 .cie-button {
     background-color: #0055A4 !important;
-    border-color: #004482 !important;
+    border: 1px solid #004482 !important;
 }
