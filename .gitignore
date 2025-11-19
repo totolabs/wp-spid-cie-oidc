@@ -15,6 +15,7 @@
 /license.txt
 /readme.html
 /wp-*.php
+!wp-spid-cie-oidc.php
 /xmlrpc.php
 
 # Configuration
