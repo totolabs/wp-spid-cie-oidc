@@ -22,6 +22,7 @@ class WP_SPID_CIE_OIDC_Public {
         
         // Hook per la pagina di login standard (wp-login.php)
         // 'login_message' è il punto standard sopra il form.
+        add_action( 'login_form', array( $this, 'print_login_buttons_on_login_page' ) );
         add_action( 'login_message', array( $this, 'print_login_buttons_on_login_page' ) );
 
         // Caricamento stili
@@ -40,7 +41,7 @@ class WP_SPID_CIE_OIDC_Public {
             $this->plugin_name,
             plugin_dir_url( __FILE__ ) . 'css/wp-spid-cie-oidc-public.css',
             array(),
-            $this->version, // Versione legata al plugin (Cache friendly)
+            $this->version,
             'all'
         );
     }
@@ -72,6 +73,7 @@ class WP_SPID_CIE_OIDC_Public {
 
             if ( $action === 'config' ) {
                 $jws = $client->getEntityStatement();
+                // HEADER DI PRODUZIONE: Fondamentale per la federazione automatica
                 header('Content-Type: application/entity-statement+jwt');
                 echo $jws;
                 exit;
@@ -84,7 +86,8 @@ class WP_SPID_CIE_OIDC_Public {
             }
 
         } catch (Exception $e) {
-            wp_die('Errore OIDC Federation: ' . esc_html($e->getMessage()));
+            // In produzione meglio non mostrare dettagli tecnici, ma per ora va bene
+            wp_die('Errore OIDC Federation: ' . esc_html($e->getMessage()), 'Errore OIDC', ['response' => 500]);
         }
     }
 
@@ -101,9 +104,9 @@ class WP_SPID_CIE_OIDC_Public {
         try {
             $client = WP_SPID_CIE_OIDC_Factory::get_client();
             
-            // Trust Anchors (Ambienti di test/produzione)
+            // In produzione CIE punta a id.cie.gov.it
             $trust_anchor = ($provider === 'cie') 
-                ? 'https://preproduzione.id.cie.gov.it/' 
+                ? 'https://id.cie.gov.it/' 
                 : 'https://registry.spid.gov.it/';
 
             $auth_url = $client->getAuthorizationUrl($trust_anchor);
@@ -116,21 +119,26 @@ class WP_SPID_CIE_OIDC_Public {
         }
     }
 
-    public function print_login_buttons_on_login_page($message) {
-        // Se $message non è vuoto (ci sono errori di login), stampiamo prima quelli
-        if (!empty($message)) {
-            echo $message;
+    private static $buttons_printed = false;
+
+    /**
+     * Stampa i bottoni. Accetta argomenti opzionali per compatibilità con vari hook.
+     */
+    public function print_login_buttons_on_login_page($arg = null) {
+        if (self::$buttons_printed) return $arg; // Ritorna l'argomento per non rompere la catena dei filtri
+        
+        // Se l'hook passa un messaggio (es. login_message), stampalo prima
+        if (is_string($arg) && !empty($arg)) {
+            echo $arg;
         }
-        
-        // Stampiamo i bottoni
+
         echo $this->render_login_buttons();
+        self::$buttons_printed = true;
         
-        // Ritorniamo null per non stampare due volte il message se siamo nel filtro
-        return null;
+        return null; // login_message si aspetta un return
     }
 
     public function render_login_buttons() {
-        // CORREZIONE NOME VARIABILE DATABASE
         $options = get_option( $this->plugin_name . '_options' ); 
         
         $spid_enabled = isset($options['spid_enabled']) && $options['spid_enabled'] === '1';
