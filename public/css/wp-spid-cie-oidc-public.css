@@ -1,11 +1,10 @@
 /**
  * Stili per l'area pubblica del plugin SPID/CIE OIDC Login.
- *
- * @since      0.1.0
  */
 
-/* Contenitore principale */
+/* --- Contenitore Login --- */
 .spid-cie-container {
+    width: 100%;
     margin: 20px 0;
     padding: 15px;
     border: 1px solid #ddd;
@@ -13,46 +12,47 @@
     border-radius: 4px;
     text-align: center;
     box-sizing: border-box;
-    width: 100%;
     clear: both;
+    font-family: "Titillium Web", Helvetica, Arial, sans-serif; /* Font AgID friendly */
 }
 
-/* Titolo opzionale */
 .spid-cie-title {
     display: block;
-    font-size: 14px;
-    font-weight: 600;
-    color: #444;
+    font-size: 16px;
+    font-weight: 700;
+    color: #1a1a1a;
     margin-bottom: 15px;
 }
 
-/* Stile Bottoni Unificato */
+/* --- Pulsanti Principali (Blu) --- */
 .spid-cie-button {
-    display: block !important;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
     width: 100%;
-    max-width: 320px; /* Larghezza ottimale per login */
-    margin: 0 auto 12px auto !important; /* Spaziatura verticale */
-    padding: 12px 0 !important; /* Altezza interna maggiore */
+    max-width: 320px;
+    margin: 0 auto 12px auto !important;
+    padding: 10px 0 !important;
     text-decoration: none !important;
     color: white !important;
     font-weight: 700 !important;
-    font-size: 16px !important;
+    font-size: 18px !important;
     border-radius: 4px;
-    text-align: center;
     box-shadow: 0 2px 4px rgba(0,0,0,0.2);
     transition: all 0.2s ease-in-out;
-    line-height: 1.4;
+    line-height: 1.2;
     box-sizing: border-box;
     cursor: pointer;
+    position: relative;
 }
 
 .spid-cie-button:hover {
     opacity: 0.9;
     transform: translateY(-1px);
-    box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+    box-shadow: 0 4px 6px rgba(0,0,0,0.25);
+    color: white !important;
 }
 
-/* Colori Ufficiali */
 .spid-button {
     background-color: #0066CC !important;
     border: 1px solid #005ab3 !important;
@@ -61,4 +61,107 @@
 .cie-button {
     background-color: #0055A4 !important;
     border: 1px solid #004482 !important;
+}
+
+/* --- Wrapper per il Dropdown SPID --- */
+.spid-button-wrapper {
+    position: relative;
+    width: 100%;
+    max-width: 320px;
+    margin: 0 auto 12px auto;
+}
+
+/* --- Dropdown Lista Provider --- */
+#spid-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    width: 100%;
+    background: white;
+    border: 1px solid #cfcfcf;
+    border-radius: 4px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+    z-index: 99999;
+    padding: 0;
+    margin: 5px 0 0 0;
+    list-style: none;
+    text-align: left;
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+#spid-dropdown.visible {
+    display: block;
+    animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Elemento Lista */
+.spid-idp-item {
+    border-bottom: 1px solid #f0f0f0;
+    margin: 0;
+    padding: 0;
+}
+
+.spid-idp-item:last-child {
+    border-bottom: none;
+}
+
+/* Link Provider */
+.spid-idp-link {
+    display: flex;
+    align-items: center;
+    padding: 12px 15px;
+    text-decoration: none !important;
+    color: #333 !important;
+    transition: background-color 0.1s;
+}
+
+.spid-idp-link:hover {
+    background-color: #e6f1fa;
+    color: #0066cc !important;
+}
+
+/* Logo Provider nel Dropdown */
+.spid-idp-icon {
+    width: 100px; /* Dimensione fissa per i loghi */
+    height: 30px;
+    margin-right: 15px;
+    object-fit: contain;
+    object-position: left center;
+    background-color: transparent;
+}
+
+/* Nome Provider (Nascosto se c'è il logo, o stilizzato) */
+.spid-idp-label {
+    font-size: 15px;
+    font-weight: 600;
+    display: none; /* Nascondiamo il testo se c'è il logo, altrimenti lo mostriamo via JS o CSS specifico */
+}
+/* Se l'immagine manca (alt text visibile) o per fallback */
+.spid-idp-link img[src=""] + .spid-idp-label {
+    display: block;
+}
+
+/* Footer del Dropdown */
+.spid-dropdown-footer {
+    background-color: #f5f5f5;
+    padding: 12px;
+    font-size: 13px;
+    text-align: center;
+    border-top: 1px solid #e1e1e1;
+}
+
+.spid-dropdown-footer a {
+    color: #0066cc;
+    text-decoration: none;
+    font-weight: 600;
+}
+.spid-dropdown-footer a:hover {
+    text-decoration: underline;
 }

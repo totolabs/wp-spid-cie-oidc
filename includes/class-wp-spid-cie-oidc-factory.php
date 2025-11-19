@@ -4,7 +4,6 @@
  * Factory per la creazione e configurazione dell'istanza client OIDC.
  * Wrapper per la libreria SPID_CIE_OIDC_PHP.
  *
- * @since      1.0.0
  * @package    WP_SPID_CIE_OIDC
  * @subpackage WP_SPID_CIE_OIDC/includes
  */
@@ -20,7 +19,7 @@ class WP_SPID_CIE_OIDC_Factory {
     public static function get_client() {
         $options = get_option('wp-spid-cie-oidc_options');
         
-        // Rimuoviamo slash finale dalla base URL per conformità CIE
+        // URL Base SENZA slash finale
         $base_url = untrailingslashit(home_url());
 
         $config = [
@@ -29,6 +28,7 @@ class WP_SPID_CIE_OIDC_Factory {
             'fiscal_number'     => $options['fiscal_number'] ?? '',
             'contacts_email'    => $options['contacts_email'] ?? get_option('admin_email'),
             'base_url'          => $base_url,
+            'test_env'          => isset($options['spid_test_env']) && $options['spid_test_env'] === '1'
         ];
 
         $upload_dir = wp_upload_dir();
@@ -45,15 +45,54 @@ class WP_SPID_CIE_OIDC_Factory {
     }
 }
 
-/**
- * Wrapper per gestire la logica OIDC (Login, Metadata, PKCE).
- */
 class WP_SPID_CIE_OIDC_Wrapper {
     
     private $config;
 
+    private $spid_providers = [
+        'validator' => [
+            'name' => 'SPID Validator (Test)',
+            'auth_endpoint' => 'https://demo.spid.gov.it/auth',
+            'logo' => 'spid-idp-spiditalia.svg'
+        ],
+        'poste' => [
+            'name' => 'Poste ID',
+            'auth_endpoint' => 'https://posteid.poste.it/j/oidc/authorization', 
+            'logo' => 'spid-idp-posteid.svg'
+        ],
+        'aruba' => [
+            'name' => 'Aruba ID',
+            'auth_endpoint' => 'https://loginspid.aruba.it/authorization',
+            'logo' => 'spid-idp-arubaid.svg'
+        ],
+        'sielte' => [
+            'name' => 'Sielte ID',
+            'auth_endpoint' => 'https://identity.sieltecloud.it/simplesaml/module.php/oidc/authorize',
+            'logo' => 'spid-idp-sielteid.svg'
+        ],
+        'namirial' => [
+            'name' => 'Namirial ID',
+            'auth_endpoint' => 'https://idp.namirialtsp.com/idp/profile/oidc/authorize', 
+            'logo' => 'spid-idp-namirialid.svg'
+        ],
+    ];
+
     public function __construct($config) {
         $this->config = $config;
+    }
+
+    /**
+     * Restituisce la lista filtrata degli IDP.
+     */
+    public function getSpidProviders() {
+        $providers = $this->spid_providers;
+        
+        // Rimuove il Validator se non siamo in modalità test
+        if (empty($this->config['test_env'])) {
+            unset($providers['validator']);
+        }
+        
+        return $providers;
     }
 
     public function generateKeys() {
@@ -78,14 +117,12 @@ class WP_SPID_CIE_OIDC_Wrapper {
         $jwk_item = $this->buildJwkItem();
         $jwks_structure = ['keys' => [$jwk_item]];
 
-        // Endpoint (Aggiungiamo lo slash qui perché rimosso dalla base_url)
         $fed_api = $this->config['base_url'] . '/.well-known/openid-federation';
         $resolve = $this->config['base_url'] . '/resolve';
         $fetch   = $this->config['base_url'] . '/fetch';
         $list    = $this->config['base_url'] . '/list';
         $status  = $this->config['base_url'] . '/trust_mark_status';
 
-        // Identifier: Preferenza al CF, fallback su IPA
         $org_id_val = $this->config['ipa_code'];
         if (!empty($this->config['fiscal_number'])) {
              $org_id_val = $this->config['fiscal_number'];
@@ -135,36 +172,32 @@ class WP_SPID_CIE_OIDC_Wrapper {
         return $this->signJwt($payload);
     }
 
-	 /**
-     * Genera l'URL di autorizzazione per l'IdP.
-     * IMPLEMENTAZIONE AGGIORNATA
-     */
-    public function getAuthorizationUrl($trust_anchor) {
-		
-		// 1. Generazione PKCE (Code Verifier & Challenge)
+    public function getAuthorizationUrl($trust_anchor, $idp_id = null) {
         $code_verifier = $this->generateCodeVerifier();
         $code_challenge = $this->generateCodeChallenge($code_verifier);
         $state = bin2hex(random_bytes(16));
         $nonce = bin2hex(random_bytes(16));
-		
-		// 2. Salviamo in sessione (WP non usa $_SESSION nativo di solito, ma qui serve)
+
         if (!session_id()) { session_start(); }
         $_SESSION['oidc_verifier'] = $code_verifier;
         $_SESSION['oidc_state'] = $state;
         $_SESSION['oidc_nonce'] = $nonce;
 
-        // 3. Endpoint di Autorizzazione dell'IdP: Default CIE Production
         $auth_endpoint = 'https://id.cie.gov.it/oidc/authorization'; 
         $scope = 'openid profile email';
         $provider_param = isset($_GET['provider']) ? $_GET['provider'] : '';
 
         if (strpos($trust_anchor, 'spid') !== false || $provider_param === 'spid') {
-             // SPID Demo Environment
-             $auth_endpoint = 'https://demo.spid.gov.it/auth'; 
              $scope = 'openid profile';
+             
+             if ($idp_id && isset($this->spid_providers[$idp_id])) {
+                 $auth_endpoint = $this->spid_providers[$idp_id]['auth_endpoint'];
+             } else {
+                 // Fallback su Validator se l'ID è ignoto (es. attacchi) o non settato
+                 $auth_endpoint = $this->spid_providers['validator']['auth_endpoint'];
+             }
         }
-		
-		// 4. Costruzione Parametri
+
         $params = [
             'client_id' => $this->config['base_url'],
             'response_type' => 'code',
@@ -182,8 +215,7 @@ class WP_SPID_CIE_OIDC_Wrapper {
     public function getUserInfo($get_params) {
         return []; 
     }
-	
-	// --- Helpers Privati ---
+
     private function buildJwkItem() {
         $crt_content = file_get_contents($this->config['key_dir'] . '/public.crt');
         if (!$crt_content) throw new Exception("Chiave pubblica non trovata.");
@@ -254,8 +286,6 @@ class WP_SPID_CIE_OIDC_Wrapper {
     private function generateCodeVerifier() {
         return $this->base64url_encode(random_bytes(64));
     }
-	
-	// PKCE Helpers
     private function generateCodeChallenge($verifier) {
         return $this->base64url_encode(hash('sha256', $verifier, true));
     }
