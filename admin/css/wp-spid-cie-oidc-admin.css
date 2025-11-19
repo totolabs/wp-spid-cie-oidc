@@ -1,0 +1,123 @@
+/**
+ * Stili per l'area di amministrazione del plugin SPID/CIE OIDC.
+ */
+
+.spid-admin-wrap {
+    max-width: 1200px;
+    margin: 20px 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+}
+
+.spid-main-col {
+    flex: 3;
+    min-width: 600px;
+}
+
+.spid-side-col {
+    flex: 1;
+    min-width: 280px;
+}
+
+/* Card Style (Simile ai Metabox di WP ma più moderno) */
+.spid-card {
+    background: #fff;
+    border: 1px solid #c3c4c7;
+    box-shadow: 0 1px 1px rgba(0,0,0,0.04);
+    padding: 20px;
+    margin-bottom: 20px;
+    border-radius: 4px;
+}
+
+.spid-card h2 {
+    margin-top: 0;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #f0f0f1;
+    font-size: 1.3em;
+    color: #1d2327;
+    font-weight: 600;
+}
+
+.spid-card p.description {
+    font-size: 13px;
+    color: #646970;
+    margin-top: 5px;
+}
+
+/* Form Elements */
+.form-table th {
+    width: 200px;
+    font-weight: 600;
+}
+
+/* Stati Chiavi */
+.spid-status-ok {
+    color: #008a20;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: #eaffea;
+    padding: 10px;
+    border: 1px solid #b8e6b8;
+    border-radius: 4px;
+}
+
+.spid-status-ko {
+    color: #d63638;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: #ffeaea;
+    padding: 10px;
+    border: 1px solid #f5c6c7;
+    border-radius: 4px;
+}
+
+/* Sidebar Boxes */
+.spid-side-box {
+    background: #fff;
+    border: 1px solid #c3c4c7;
+    margin-bottom: 20px;
+    box-shadow: 0 1px 1px rgba(0,0,0,0.04);
+}
+
+.spid-side-header {
+    background: #f6f7f7;
+    padding: 12px;
+    border-bottom: 1px solid #c3c4c7;
+    font-weight: 600;
+    font-size: 14px;
+    color: #1d2327;
+}
+
+.spid-side-content {
+    padding: 15px;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.spid-side-content ul {
+    margin: 10px 0 15px 15px;
+    list-style: disc;
+    color: #50575e;
+}
+
+.spid-side-content li {
+    margin-bottom: 5px;
+}
+
+.button-full {
+    width: 100%;
+    text-align: center;
+    margin-bottom: 5px !important;
+    display: block;
+}
+
+/* Input Code Style */
+input.code {
+    font-family: monospace;
+    background: #f6f7f7;
+}
