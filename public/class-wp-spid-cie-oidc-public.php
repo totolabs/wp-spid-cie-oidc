@@ -136,6 +136,10 @@ class WP_SPID_CIE_OIDC_Public {
         
         $spid_enabled = isset($options['spid_enabled']) && $options['spid_enabled'] === '1';
         $cie_enabled = isset($options['cie_enabled']) && $options['cie_enabled'] === '1';
+        
+        // Gestione Disclaimer
+        $disclaimer_enabled = isset($options['disclaimer_enabled']) && $options['disclaimer_enabled'] === '1';
+        $disclaimer_text = !empty($options['disclaimer_text']) ? $options['disclaimer_text'] : '';
 
         if ( ! $spid_enabled && ! $cie_enabled ) return '';
 
@@ -146,8 +150,6 @@ class WP_SPID_CIE_OIDC_Public {
             require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/class-wp-spid-cie-oidc-factory.php';
         }
         $client = WP_SPID_CIE_OIDC_Factory::get_client();
-        
-        // Recupera la lista (filtrata dalla Factory in base al checkbox Test Env)
         $spid_idps = $client->getSpidProviders();
 
         $keys = array_keys($spid_idps);
@@ -157,12 +159,18 @@ class WP_SPID_CIE_OIDC_Public {
             $shuffled_idps[$key] = $spid_idps[$key];
         }
 
-        // PERCORSO CORRETTO: punta alla cartella pubblica 'img'
         $assets_url = plugin_dir_url(__FILE__) . 'img/';
 
         ob_start();
         ?>
         <div class="spid-cie-container">
+            
+            <?php if ($disclaimer_enabled && !empty($disclaimer_text)): ?>
+            <div style="background-color: #fff8e5; border: 1px solid #faebcc; color: #8a6d3b; padding: 10px; margin-bottom: 15px; font-size: 13px; border-radius: 4px; line-height: 1.4; text-align: left;">
+                <?php echo wp_kses_post($disclaimer_text); ?>
+            </div>
+            <?php endif; ?>
+
             <span class="spid-cie-title">Accedi con Identità Digitale</span>
             
             <?php if ($spid_enabled): ?>
@@ -183,6 +191,7 @@ class WP_SPID_CIE_OIDC_Public {
                                     <?php endif; ?>
                                     <span class="spid-idp-label"><?php echo esc_html($idp['name']); ?></span>
                                 </a>
+
                             </li>
                         <?php endforeach; ?>
                         <li class="spid-dropdown-footer">

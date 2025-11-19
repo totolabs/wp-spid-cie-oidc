@@ -19,7 +19,6 @@ class WP_SPID_CIE_OIDC_Factory {
     public static function get_client() {
         $options = get_option('wp-spid-cie-oidc_options');
         
-        // URL Base SENZA slash finale
         $base_url = untrailingslashit(home_url());
 
         $config = [
@@ -52,26 +51,31 @@ class WP_SPID_CIE_OIDC_Wrapper {
     private $spid_providers = [
         'validator' => [
             'name' => 'SPID Validator (Test)',
-            'auth_endpoint' => 'https://demo.spid.gov.it/auth',
+            'issuer' => 'https://validator.spid.gov.it',
+            'auth_endpoint' => 'https://validator.spid.gov.it/oidc/op/authorization',
             'logo' => 'spid-idp-spiditalia.svg'
         ],
         'poste' => [
             'name' => 'Poste ID',
+            'issuer' => 'https://posteid.poste.it',
             'auth_endpoint' => 'https://posteid.poste.it/j/oidc/authorization', 
             'logo' => 'spid-idp-posteid.svg'
         ],
         'aruba' => [
             'name' => 'Aruba ID',
+            'issuer' => 'https://loginspid.aruba.it',
             'auth_endpoint' => 'https://loginspid.aruba.it/authorization',
             'logo' => 'spid-idp-arubaid.svg'
         ],
         'sielte' => [
             'name' => 'Sielte ID',
+            'issuer' => 'https://identity.sieltecloud.it',
             'auth_endpoint' => 'https://identity.sieltecloud.it/simplesaml/module.php/oidc/authorize',
             'logo' => 'spid-idp-sielteid.svg'
         ],
         'namirial' => [
             'name' => 'Namirial ID',
+            'issuer' => 'https://idp.namirialtsp.com', 
             'auth_endpoint' => 'https://idp.namirialtsp.com/idp/profile/oidc/authorize', 
             'logo' => 'spid-idp-namirialid.svg'
         ],
@@ -81,17 +85,11 @@ class WP_SPID_CIE_OIDC_Wrapper {
         $this->config = $config;
     }
 
-    /**
-     * Restituisce la lista filtrata degli IDP.
-     */
     public function getSpidProviders() {
         $providers = $this->spid_providers;
-        
-        // Rimuove il Validator se non siamo in modalità test
         if (empty($this->config['test_env'])) {
             unset($providers['validator']);
         }
-        
         return $providers;
     }
 
@@ -113,7 +111,6 @@ class WP_SPID_CIE_OIDC_Wrapper {
         $now = time();
         $exp = $now + (86400 * 365); 
         $sub = $this->config['base_url'];
-        
         $jwk_item = $this->buildJwkItem();
         $jwks_structure = ['keys' => [$jwk_item]];
 
@@ -135,7 +132,7 @@ class WP_SPID_CIE_OIDC_Wrapper {
             "iat" => $now,
             "exp" => $exp,
             "jwks" => $jwks_structure,
-            "authority_hints" => [],
+            "authority_hints" => [], 
             "metadata" => [
                 "openid_relying_party" => [
                     "application_type" => "web",
@@ -172,7 +169,11 @@ class WP_SPID_CIE_OIDC_Wrapper {
         return $this->signJwt($payload);
     }
 
+    /**
+     * Genera l'URL di autorizzazione.
+     */
     public function getAuthorizationUrl($trust_anchor, $idp_id = null) {
+        
         $code_verifier = $this->generateCodeVerifier();
         $code_challenge = $this->generateCodeChallenge($code_verifier);
         $state = bin2hex(random_bytes(16));
@@ -183,30 +184,61 @@ class WP_SPID_CIE_OIDC_Wrapper {
         $_SESSION['oidc_state'] = $state;
         $_SESSION['oidc_nonce'] = $nonce;
 
-        $auth_endpoint = 'https://id.cie.gov.it/oidc/authorization'; 
+        $auth_endpoint = '';
+        $issuer = ''; // Per il campo 'aud' del Request Object
         $scope = 'openid profile email';
         $provider_param = isset($_GET['provider']) ? $_GET['provider'] : '';
+        $acr_values = 'https://www.spid.gov.it/SpidL2';
 
-        if (strpos($trust_anchor, 'spid') !== false || $provider_param === 'spid') {
-             $scope = 'openid profile';
+        // Selezione Endpoint
+        if (strpos($trust_anchor, 'cie') !== false || $provider_param === 'cie') {
+             // CIE
+             $auth_endpoint = 'https://id.cie.gov.it/oidc/authorization';
+             $issuer = 'https://id.cie.gov.it/oidc/op/'; // Issuer CIE standard
+             $scope = 'openid profile email';
+             $provider_param = 'cie';
+             $acr_values = 'https://www.spid.gov.it/SpidL2'; 
+        } else {
+             // SPID
+             $provider_param = 'spid';
+             $scope = 'openid profile'; 
              
+             $selected_idp = 'validator'; // Default
              if ($idp_id && isset($this->spid_providers[$idp_id])) {
-                 $auth_endpoint = $this->spid_providers[$idp_id]['auth_endpoint'];
-             } else {
-                 // Fallback su Validator se l'ID è ignoto (es. attacchi) o non settato
-                 $auth_endpoint = $this->spid_providers['validator']['auth_endpoint'];
+                 $selected_idp = $idp_id;
              }
+             
+             $auth_endpoint = $this->spid_providers[$selected_idp]['auth_endpoint'];
+             $issuer = $this->spid_providers[$selected_idp]['issuer'];
         }
+
+        // Costruzione Request Object (JWT)
+        $ro_payload = [
+            'iss' => $this->config['base_url'],
+            'sub' => $this->config['base_url'],
+            'aud' => [$issuer], // Audience fondamentale
+            'iat' => time(),
+            'exp' => time() + 300,
+            'client_id' => $this->config['base_url'],
+            'response_type' => 'code',
+            'scope' => $scope,
+            'redirect_uri' => add_query_arg(['oidc_action' => 'callback', 'provider' => $provider_param], $this->config['base_url']),
+            'state' => $state,
+            'nonce' => $nonce,
+            'code_challenge' => $code_challenge,
+            'code_challenge_method' => 'S256',
+            'acr_values' => $acr_values,
+            'prompt' => 'login'
+        ];
+
+        // Firma con header 'typ' => 'oauth-authz-req+jwt'
+        $request_token = $this->signRequestObject($ro_payload);
 
         $params = [
             'client_id' => $this->config['base_url'],
             'response_type' => 'code',
             'scope' => $scope,
-            'redirect_uri' => add_query_arg(['oidc_action' => 'callback', 'provider' => ($provider_param ?: 'cie')], $this->config['base_url']),
-            'state' => $state,
-            'nonce' => $nonce,
-            'code_challenge' => $code_challenge,
-            'code_challenge_method' => 'S256',
+            'request' => $request_token // Parametro obbligatorio
         ];
 
         return $auth_endpoint . '?' . http_build_query($params);
@@ -216,36 +248,36 @@ class WP_SPID_CIE_OIDC_Wrapper {
         return []; 
     }
 
+    // --- Helpers Privati ---
+
     private function buildJwkItem() {
         $crt_content = file_get_contents($this->config['key_dir'] . '/public.crt');
         if (!$crt_content) throw new Exception("Chiave pubblica non trovata.");
-
         $key = \phpseclib3\Crypt\PublicKeyLoader::load($crt_content);
         $jwk_native = json_decode($key->toString('JWK'), true);
-
-        if (isset($jwk_native['keys'][0])) {
-            $jwk_native = $jwk_native['keys'][0];
-        }
-
-        $jwk_item = [
-            'kty' => 'RSA',
-            'n'   => $jwk_native['n'], 
-            'e'   => $jwk_native['e'], 
-            'alg' => 'RS256',
-            'use' => 'sig',
-            'kid' => $this->getKid()
+        if (isset($jwk_native['keys'][0])) $jwk_native = $jwk_native['keys'][0];
+        return [
+            'kty' => 'RSA', 'n' => $jwk_native['n'], 'e' => $jwk_native['e'], 
+            'alg' => 'RS256', 'use' => 'sig', 'kid' => $this->getKid()
         ];
-
-        return $jwk_item;
     }
 
+    // Firma Metadata (entity-statement+jwt)
     private function signJwt($payload) {
+        return $this->signGenericJwt($payload, 'entity-statement+jwt');
+    }
+
+    // Firma Request Object (oauth-authz-req+jwt)
+    private function signRequestObject($payload) {
+        return $this->signGenericJwt($payload, 'oauth-authz-req+jwt');
+    }
+
+    private function signGenericJwt($payload, $typ) {
         $privateKeyContent = file_get_contents($this->config['key_dir'] . '/private.key');
         $rsa = \phpseclib3\Crypt\RSA::load($privateKeyContent);
-        
         $rsa = $rsa->withHash('sha256')->withPadding(\phpseclib3\Crypt\RSA::SIGNATURE_PKCS1);
 
-        $header = ['typ' => 'entity-statement+jwt', 'alg' => 'RS256', 'kid' => $this->getKid()];
+        $header = ['typ' => $typ, 'alg' => 'RS256', 'kid' => $this->getKid()];
         
         $jsonHeader = json_encode($header, JSON_UNESCAPED_SLASHES);
         $jsonPayload = json_encode($payload, JSON_UNESCAPED_SLASHES);
@@ -261,21 +293,11 @@ class WP_SPID_CIE_OIDC_Wrapper {
     private function getKid() {
         $crt = file_get_contents($this->config['key_dir'] . '/public.crt');
         $key = \phpseclib3\Crypt\PublicKeyLoader::load($crt);
-        
         $jwk_native = json_decode($key->toString('JWK'), true);
-        if (isset($jwk_native['keys'][0])) {
-            $jwk_native = $jwk_native['keys'][0];
-        }
-        
-        $jwk = [
-            'e'   => $jwk_native['e'],
-            'kty' => 'RSA',
-            'n'   => $jwk_native['n'],
-        ];
-        
+        if (isset($jwk_native['keys'][0])) $jwk_native = $jwk_native['keys'][0];
+        $jwk = ['e' => $jwk_native['e'], 'kty' => 'RSA', 'n' => $jwk_native['n']];
         ksort($jwk);
         $json = json_encode($jwk, JSON_UNESCAPED_SLASHES);
-        
         return $this->base64url_encode(hash('sha256', $json, true));
     }
 

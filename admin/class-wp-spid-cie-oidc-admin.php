@@ -72,7 +72,7 @@ class WP_SPID_CIE_OIDC_Admin {
             ['id' => 'fiscal_number', 'desc' => 'Codice Fiscale numerico dell\'Ente (es. 80028330654)']
         );
         add_settings_field('contacts_email', 'Email Contatto Tecnico', array($this, 'render_text_field'), $this->plugin_name, 'ente_section', 
-            ['id' => 'contacts_email', 'type' => 'email', 'desc' => 'Email per comunicazioni tecniche.']
+            ['id' => 'contacts_email', 'type' => 'email', 'desc' => 'Email per comunicazioni tecniche relative alla federazione.']
         );
 
         // --- SEZIONE 2: GESTIONE CHIAVI ---
@@ -83,10 +83,21 @@ class WP_SPID_CIE_OIDC_Admin {
         add_settings_section('providers_section', '3. Configurazione Provider', null, $this->plugin_name);
         add_settings_field('spid_enabled', 'Abilita SPID', array($this, 'render_checkbox_field'), $this->plugin_name, 'providers_section', ['id' => 'spid_enabled']);
         add_settings_field('cie_enabled', 'Abilita CIE', array($this, 'render_checkbox_field'), $this->plugin_name, 'providers_section', ['id' => 'cie_enabled']);
-        
-        // NUOVO CAMPO: AMBIENTE TEST
         add_settings_field('spid_test_env', 'Abilita Ambiente di Test', array($this, 'render_checkbox_field'), $this->plugin_name, 'providers_section', 
             ['id' => 'spid_test_env', 'desc' => 'Mostra "SPID Validator" nel menu di scelta (Utile per collaudo).']
+        );
+
+        // --- SEZIONE 4: DISCLAIMER ---
+        add_settings_section('disclaimer_section', '4. Gestione Avvisi (Disclaimer)', null, $this->plugin_name);
+        
+        add_settings_field('disclaimer_enabled', 'Attiva Messaggio Avviso', array($this, 'render_checkbox_field'), $this->plugin_name, 'disclaimer_section', 
+            ['id' => 'disclaimer_enabled', 'desc' => 'Mostra un box di avviso sopra i pulsanti di login.']
+        );
+        
+        $default_msg = "⚠️ <strong>Avviso Tecnico:</strong><br>I servizi di accesso SPID e CIE sono in fase di <strong>aggiornamento programmato</strong>. Il login potrebbe essere temporaneamente non disponibile.";
+        
+        add_settings_field('disclaimer_text', 'Testo dell\'Avviso', array($this, 'render_textarea_field'), $this->plugin_name, 'disclaimer_section', 
+            ['id' => 'disclaimer_text', 'default' => $default_msg, 'desc' => 'Puoi usare tag HTML come &lt;strong&gt;, &lt;br&gt;, &lt;a&gt;.']
         );
     }
 
@@ -113,7 +124,9 @@ class WP_SPID_CIE_OIDC_Admin {
 
     public function render_keys_manager() {
         $keys_exist = false;
-        $keys_dir = trailingslashit(wp_upload_dir()['basedir']) . 'spid-cie-oidc-keys';
+        $upload_dir = wp_upload_dir();
+        $keys_dir = trailingslashit($upload_dir['basedir']) . 'spid-cie-oidc-keys';
+        
         if (file_exists($keys_dir . '/private.key') && file_exists($keys_dir . '/public.crt')) {
             $keys_exist = true;
         }
@@ -153,6 +166,26 @@ class WP_SPID_CIE_OIDC_Admin {
         if ($desc) echo "<p class='description'>$desc</p>";
     }
 
+    // FIX: Logica migliorata per il default
+    public function render_textarea_field( $args ) {
+        $options = get_option( $this->plugin_name . '_options' );
+        $id = $args['id'];
+        $default = $args['default'] ?? '';
+        
+        // Se l'opzione esiste la usiamo
+        $val = isset($options[$id]) ? $options[$id] : '';
+        
+        // Se è vuota, ma abbiamo un default, pre-compiliamo per comodità
+        // (Solo visivamente, finché l'utente non salva)
+        if (empty($val) && !empty($default)) { 
+             $val = $default; 
+        }
+        
+        $desc = $args['desc'] ?? '';
+        echo "<textarea name='{$this->plugin_name}_options[$id]' class='large-text' rows='4'>" . esc_textarea($val) . "</textarea>";
+        if ($desc) echo "<p class='description'>$desc</p>";
+    }
+
     public function render_checkbox_field( $args ) {
         $options = get_option( $this->plugin_name . '_options' );
         $id = $args['id'];
@@ -169,11 +202,16 @@ class WP_SPID_CIE_OIDC_Admin {
             if (isset($input[$f])) { $new_input[$f] = sanitize_text_field($input[$f]); }
         }
         
-        // AGGIUNTO spid_test_env ALLA LISTA CHECKBOX
-        $checkboxes = ['spid_enabled', 'cie_enabled', 'spid_test_env'];
+        $checkboxes = ['spid_enabled', 'cie_enabled', 'spid_test_env', 'disclaimer_enabled'];
         foreach ($checkboxes as $c) {
             $new_input[$c] = (isset($input[$c]) && $input[$c] === '1') ? '1' : '0';
         }
+
+        // Sanificazione HTML per la textarea
+        if (isset($input['disclaimer_text'])) {
+            $new_input['disclaimer_text'] = wp_kses_post($input['disclaimer_text']);
+        }
+        
         return $new_input;
     }
 }
