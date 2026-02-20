@@ -19,7 +19,9 @@ class WP_SPID_CIE_OIDC_Factory {
     public static function get_client() {
         $options = get_option('wp-spid-cie-oidc_options');
         
-        $base_url = untrailingslashit( $options['issuer_override'] ?? home_url() );
+        $issuer_override = isset($options['issuer_override']) ? trim((string) $options['issuer_override']) : '';
+        $base_source = $issuer_override !== '' ? $issuer_override : home_url();
+        $base_url = untrailingslashit(set_url_scheme((string) $base_source, 'https'));
 
         $config = [
             'organization_name' => $options['organization_name'] ?? get_bloginfo('name'),
@@ -48,6 +50,37 @@ class WP_SPID_CIE_OIDC_Factory {
         $config['key_dir'] = $keys_dir;
 
         return new WP_SPID_CIE_OIDC_Wrapper($config);
+    }
+
+    /**
+     * Runtime services for OIDC login callback flow (Milestone 1).
+     */
+    public static function get_runtime_services() {
+        $logger = new WP_SPID_CIE_OIDC_Logger('OIDC');
+        $pkce = new WP_SPID_CIE_OIDC_PkceService();
+        $store = new WP_SPID_CIE_OIDC_TransientStateNonceStore();
+        $validator = new WP_SPID_CIE_OIDC_TokenValidator($logger);
+        $client = new WP_SPID_CIE_OIDC_OidcClient($pkce, $store, $validator, $logger);
+        $userMapper = new WP_SPID_CIE_OIDC_WpUserMapper($logger);
+        $authService = new WP_SPID_CIE_OIDC_WpAuthService($logger);
+
+        return [
+            'logger' => $logger,
+            'oidc_client' => $client,
+            'user_mapper' => $userMapper,
+            'auth_service' => $authService,
+        ];
+    }
+
+    /**
+     * Provider registry with SPID/CIE profiles + discovery resolver.
+     */
+    public static function get_provider_registry() {
+        $runtime = self::get_runtime_services();
+        $logger = $runtime['logger'];
+        $wrapper = self::get_client();
+        $resolver = new WP_SPID_CIE_OIDC_DiscoveryResolver($logger);
+        return new WP_SPID_CIE_OIDC_ProviderRegistry($resolver, $wrapper);
     }
 }
 
@@ -206,7 +239,11 @@ class WP_SPID_CIE_OIDC_Wrapper {
     public function getEntityStatement() {
         $now = time();
         $exp = $now + 21600; // 6 ore 
-        $sub = $this->config['base_url'];
+        $sub = trim((string) ($this->config['base_url'] ?? ''));
+        if ($sub === '') {
+            throw new Exception('Issuer base_url non configurato');
+        }
+
         $jwk_item = $this->buildJwkItem();
         $jwks_structure = ['keys' => [$jwk_item]];
 

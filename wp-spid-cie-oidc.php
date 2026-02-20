@@ -40,6 +40,20 @@ if ( file_exists( plugin_dir_path( __FILE__ ) . 'vendor/autoload.php' ) ) {
 // 2. Carica la nostra Factory (Gestione Configurazione e Chiavi)
 require_once plugin_dir_path( __FILE__ ) . 'includes/class-wp-spid-cie-oidc-factory.php';
 
+// 2.b Core OIDC runtime services (Milestone 1)
+require_once plugin_dir_path( __FILE__ ) . 'includes/Logging/Logger.php';
+require_once plugin_dir_path( __FILE__ ) . 'includes/Core/PkceService.php';
+require_once plugin_dir_path( __FILE__ ) . 'includes/Core/StateNonceStore.php';
+require_once plugin_dir_path( __FILE__ ) . 'includes/Core/TokenValidator.php';
+require_once plugin_dir_path( __FILE__ ) . 'includes/Core/OidcClient.php';
+require_once plugin_dir_path( __FILE__ ) . 'includes/Providers/ProviderProfileInterface.php';
+require_once plugin_dir_path( __FILE__ ) . 'includes/Providers/DiscoveryResolver.php';
+require_once plugin_dir_path( __FILE__ ) . 'includes/Providers/SpidProviderProfile.php';
+require_once plugin_dir_path( __FILE__ ) . 'includes/Providers/CieProviderProfile.php';
+require_once plugin_dir_path( __FILE__ ) . 'includes/Providers/ProviderRegistry.php';
+require_once plugin_dir_path( __FILE__ ) . 'includes/WP/WpUserMapper.php';
+require_once plugin_dir_path( __FILE__ ) . 'includes/WP/WpAuthService.php';
+
 // 3. Carica le classi Admin e Public
 require_once plugin_dir_path( __FILE__ ) . 'admin/class-wp-spid-cie-oidc-admin.php';
 require_once plugin_dir_path( __FILE__ ) . 'public/class-wp-spid-cie-oidc-public.php';
