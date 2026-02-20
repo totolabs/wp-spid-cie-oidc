@@ -19,7 +19,9 @@ class WP_SPID_CIE_OIDC_Factory {
     public static function get_client() {
         $options = get_option('wp-spid-cie-oidc_options');
         
-        $base_url = untrailingslashit( $options['issuer_override'] ?? home_url() );
+        $issuer_override = isset($options['issuer_override']) ? trim((string) $options['issuer_override']) : '';
+        $base_source = $issuer_override !== '' ? $issuer_override : home_url();
+        $base_url = untrailingslashit(set_url_scheme((string) $base_source, 'https'));
 
         $config = [
             'organization_name' => $options['organization_name'] ?? get_bloginfo('name'),
@@ -48,6 +50,37 @@ class WP_SPID_CIE_OIDC_Factory {
         $config['key_dir'] = $keys_dir;
 
         return new WP_SPID_CIE_OIDC_Wrapper($config);
+    }
+
+    /**
+     * Runtime services for OIDC login callback flow (Milestone 1).
+     */
+    public static function get_runtime_services() {
+        $logger = new WP_SPID_CIE_OIDC_Logger('OIDC');
+        $pkce = new WP_SPID_CIE_OIDC_PkceService();
+        $store = new WP_SPID_CIE_OIDC_TransientStateNonceStore();
+        $validator = new WP_SPID_CIE_OIDC_TokenValidator($logger);
+        $client = new WP_SPID_CIE_OIDC_OidcClient($pkce, $store, $validator, $logger);
+        $userMapper = new WP_SPID_CIE_OIDC_WpUserMapper($logger);
+        $authService = new WP_SPID_CIE_OIDC_WpAuthService($logger);
+
+        return [
+            'logger' => $logger,
+            'oidc_client' => $client,
+            'user_mapper' => $userMapper,
+            'auth_service' => $authService,
+        ];
+    }
+
+    /**
+     * Provider registry with SPID/CIE profiles + discovery resolver.
+     */
+    public static function get_provider_registry() {
+        $runtime = self::get_runtime_services();
+        $logger = $runtime['logger'];
+        $wrapper = self::get_client();
+        $resolver = new WP_SPID_CIE_OIDC_DiscoveryResolver($logger);
+        return new WP_SPID_CIE_OIDC_ProviderRegistry($resolver, $wrapper);
     }
 }
 
@@ -206,7 +239,11 @@ class WP_SPID_CIE_OIDC_Wrapper {
     public function getEntityStatement() {
         $now = time();
         $exp = $now + 21600; // 6 ore 
-        $sub = $this->config['base_url'];
+        $sub = trim((string) ($this->config['base_url'] ?? ''));
+        if ($sub === '') {
+            throw new Exception('Issuer base_url non configurato');
+        }
+
         $jwk_item = $this->buildJwkItem();
         $jwks_structure = ['keys' => [$jwk_item]];
 
@@ -321,6 +358,85 @@ class WP_SPID_CIE_OIDC_Wrapper {
 		}
 		
         return $this->signJwt($payload);
+    }
+
+    /**
+     * Endpoint /resolve OpenID Federation.
+     * Ritorna un resolve-response+jwt firmato con la stessa chiave federativa.
+     */
+    public function getResolveResponse($sub = '', $trust_anchor = '') {
+        $base_sub = trim((string) ($this->config['base_url'] ?? ''));
+        if ($base_sub === '') {
+            throw new Exception('Issuer base_url non configurato');
+        }
+
+        $resolved_sub = trim((string) $sub);
+        if ($resolved_sub === '') {
+            $resolved_sub = $base_sub;
+        }
+
+        $now = time();
+        $exp = $now + 21600;
+        $jwk_item = $this->buildJwkItem();
+        $jwks_structure = ['keys' => [$jwk_item]];
+
+        $fed_api = $base_sub . '/.well-known/openid-federation';
+        $resolve = $base_sub . '/resolve';
+        $fetch   = $base_sub . '/fetch';
+        $list    = $base_sub . '/list';
+        $status  = $base_sub . '/trust_mark_status';
+
+        $org_id_val = $this->config['ipa_code'];
+        if (!empty($this->config['fiscal_number'])) {
+            $org_id_val = $this->config['fiscal_number'];
+        }
+        $org_identifier = 'PA:IT-' . $org_id_val;
+
+        $payload = [
+            'iss' => $base_sub,
+            'sub' => $resolved_sub,
+            'iat' => $now,
+            'exp' => $exp,
+            'jwks' => $jwks_structure,
+            'metadata' => [
+                'openid_relying_party' => [
+                    'application_type' => 'web',
+                    'client_id' => $base_sub,
+                    'client_registration_types' => ['automatic'],
+                    'jwks' => $jwks_structure,
+                    'client_name' => $this->config['organization_name'],
+                    'contacts' => [$this->config['contacts_email']],
+                    'grant_types' => ['authorization_code', 'refresh_token'],
+                    'redirect_uris' => [
+                        add_query_arg(['oidc_action' => 'callback', 'provider' => 'spid'], $base_sub),
+                        add_query_arg(['oidc_action' => 'callback', 'provider' => 'cie'], $base_sub)
+                    ],
+                    'response_types' => ['code'],
+                    'subject_type' => 'public'
+                ],
+                'federation_entity' => [
+                    'organization_name' => $this->config['organization_name'],
+                    'homepage_uri' => $base_sub,
+                    'policy_uri' => $base_sub . '/privacy-policy',
+                    'logo_uri' => $base_sub . '/wp-admin/images/w-logo-blue.png',
+                    'contacts' => [$this->config['contacts_email']],
+                    'federation_api_endpoint' => $fed_api,
+                    'federation_resolve_endpoint' => $resolve,
+                    'federation_fetch_endpoint' => $fetch,
+                    'federation_list_endpoint' => $list,
+                    'federation_trust_mark_status_endpoint' => $status,
+                    'ipa_code' => $this->config['ipa_code'],
+                    'organization_identifier' => $org_identifier
+                ]
+            ]
+        ];
+
+        $ta = trim((string) $trust_anchor);
+        if ($ta !== '') {
+            $payload['trust_anchor'] = untrailingslashit($ta);
+        }
+
+        return $this->signGenericJwt($payload, 'resolve-response+jwt');
     }
 
     /**
