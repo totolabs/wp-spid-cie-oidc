@@ -19,7 +19,8 @@ class WP_SPID_CIE_OIDC_Factory {
     public static function get_client() {
         $options = get_option('wp-spid-cie-oidc_options');
         
-        $base_url = untrailingslashit( $options['issuer_override'] ?? home_url() );
+        $issuer_override = isset($options['issuer_override']) ? trim((string) $options['issuer_override']) : '';
+        $base_url = untrailingslashit( $issuer_override !== '' ? $issuer_override : home_url() );
 
         $config = [
             'organization_name' => $options['organization_name'] ?? get_bloginfo('name'),

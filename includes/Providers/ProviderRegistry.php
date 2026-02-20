@@ -23,7 +23,8 @@ class WP_SPID_CIE_OIDC_ProviderRegistry {
             return new WP_Error('oidc_provider_disabled', __('Provider non abilitato dalla configurazione.', 'wp-spid-cie-oidc'));
         }
 
-        $baseUrl = untrailingslashit($options['issuer_override'] ?? home_url());
+        $issuerOverride = isset($options['issuer_override']) ? trim((string) $options['issuer_override']) : '';
+        $baseUrl = untrailingslashit($issuerOverride !== '' ? $issuerOverride : home_url());
 
         $config = $this->profiles[$provider]->resolveConfig($options, $idp, $this->wrapper, $this->discoveryResolver);
         if (is_wp_error($config)) {
