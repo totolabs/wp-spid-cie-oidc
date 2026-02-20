@@ -222,7 +222,57 @@ class WP_SPID_CIE_OIDC_Admin {
 
         // CIE
         add_settings_field('cie_enabled', 'Abilita CIE', array($this, 'render_checkbox_field'), $this->plugin_name . '_providers', 'providers_section', ['id' => 'cie_enabled', 'desc' => 'Mostra il pulsante "Entra con CIE".']);
-        
+
+        // Milestone 2: Provider profiles + discovery + LoA/ACR policy
+        add_settings_field('provider_mode', 'Modalità Provider', array($this, 'render_select_field'), $this->plugin_name . '_providers', 'providers_section', [
+            'id' => 'provider_mode',
+            'options' => ['both' => 'SPID + CIE', 'spid_only' => 'Solo SPID', 'cie_only' => 'Solo CIE'],
+            'default' => 'both',
+            'desc' => 'Definisce quali provider sono autorizzati al login OIDC.'
+        ]);
+        add_settings_field('discovery_mode', 'Modalità Discovery', array($this, 'render_select_field'), $this->plugin_name . '_providers', 'providers_section', [
+            'id' => 'discovery_mode',
+            'options' => ['auto' => 'Auto (.well-known)', 'manual' => 'Manual endpoints'],
+            'default' => 'auto',
+            'desc' => 'Auto: usa issuer/.well-known/openid-configuration. Manual: usa endpoint configurati sotto.'
+        ]);
+
+        add_settings_field('min_loa', 'Livello minimo LoA/ACR', array($this, 'render_select_field'), $this->plugin_name . '_providers', 'providers_section', [
+            'id' => 'min_loa',
+            'options' => ['SpidL1' => 'SpidL1', 'SpidL2' => 'SpidL2 (consigliato)', 'SpidL3' => 'SpidL3'],
+            'default' => 'SpidL2',
+            'desc' => 'Valore minimo accettato nel claim acr.'
+        ]);
+        add_settings_field('auto_provisioning', 'Provisioning automatico utenti', array($this, 'render_checkbox_field'), $this->plugin_name . '_providers', 'providers_section', [
+            'id' => 'auto_provisioning',
+            'desc' => 'Se attivo, crea utenti WordPress quando non esiste un match identità.'
+        ]);
+        add_settings_field('default_role', 'Ruolo di default nuovi utenti', array($this, 'render_select_field'), $this->plugin_name . '_providers', 'providers_section', [
+            'id' => 'default_role',
+            'options' => $this->get_role_options(),
+            'default' => get_option('default_role', 'subscriber'),
+            'desc' => 'Ruolo assegnato ai nuovi utenti creati via provisioning.'
+        ]);
+        add_settings_field('spid_issuer', 'SPID Issuer', array($this, 'render_text_field'), $this->plugin_name . '_providers', 'providers_section', ['id' => 'spid_issuer', 'placeholder' => 'https://...', 'desc' => 'Issuer SPID (usato per discovery auto e validazione iss).']);
+        add_settings_field('cie_issuer', 'CIE Issuer', array($this, 'render_text_field'), $this->plugin_name . '_providers', 'providers_section', ['id' => 'cie_issuer', 'placeholder' => 'https://...', 'desc' => 'Issuer CIE (usato per discovery auto e validazione iss).']);
+
+        add_settings_field('spid_scope', 'SPID Scope', array($this, 'render_text_field'), $this->plugin_name . '_providers', 'providers_section', ['id' => 'spid_scope', 'placeholder' => 'openid profile', 'desc' => 'Scope base SPID.']);
+        add_settings_field('cie_scope', 'CIE Scope', array($this, 'render_text_field'), $this->plugin_name . '_providers', 'providers_section', ['id' => 'cie_scope', 'placeholder' => 'openid profile email', 'desc' => 'Scope base CIE.']);
+        add_settings_field('spid_acr_values', 'SPID acr_values', array($this, 'render_text_field'), $this->plugin_name . '_providers', 'providers_section', ['id' => 'spid_acr_values', 'placeholder' => 'https://www.spid.gov.it/SpidL2', 'desc' => 'Override opzionale acr_values SPID.']);
+        add_settings_field('cie_acr_values', 'CIE acr_values', array($this, 'render_text_field'), $this->plugin_name . '_providers', 'providers_section', ['id' => 'cie_acr_values', 'placeholder' => 'https://www.spid.gov.it/SpidL2', 'desc' => 'Override opzionale acr_values CIE.']);
+
+        // Manual endpoints (discovery_mode=manual)
+        add_settings_field('spid_authorization_endpoint', 'SPID Authorization endpoint', array($this, 'render_text_field'), $this->plugin_name . '_providers', 'providers_section', ['id' => 'spid_authorization_endpoint', 'placeholder' => 'https://...', 'desc' => 'Usato solo in modalità manual.']);
+        add_settings_field('spid_token_endpoint', 'SPID Token endpoint', array($this, 'render_text_field'), $this->plugin_name . '_providers', 'providers_section', ['id' => 'spid_token_endpoint', 'placeholder' => 'https://...', 'desc' => 'Usato solo in modalità manual.']);
+        add_settings_field('spid_jwks_uri', 'SPID JWKS URI', array($this, 'render_text_field'), $this->plugin_name . '_providers', 'providers_section', ['id' => 'spid_jwks_uri', 'placeholder' => 'https://...', 'desc' => 'Usato solo in modalità manual.']);
+        add_settings_field('spid_userinfo_endpoint', 'SPID UserInfo endpoint', array($this, 'render_text_field'), $this->plugin_name . '_providers', 'providers_section', ['id' => 'spid_userinfo_endpoint', 'placeholder' => 'https://...', 'desc' => 'Opzionale.']);
+        add_settings_field('spid_end_session_endpoint', 'SPID End Session endpoint', array($this, 'render_text_field'), $this->plugin_name . '_providers', 'providers_section', ['id' => 'spid_end_session_endpoint', 'placeholder' => 'https://...', 'desc' => 'Opzionale.']);
+
+        add_settings_field('cie_authorization_endpoint', 'CIE Authorization endpoint', array($this, 'render_text_field'), $this->plugin_name . '_providers', 'providers_section', ['id' => 'cie_authorization_endpoint', 'placeholder' => 'https://...', 'desc' => 'Usato solo in modalità manual.']);
+        add_settings_field('cie_token_endpoint', 'CIE Token endpoint', array($this, 'render_text_field'), $this->plugin_name . '_providers', 'providers_section', ['id' => 'cie_token_endpoint', 'placeholder' => 'https://...', 'desc' => 'Usato solo in modalità manual.']);
+        add_settings_field('cie_jwks_uri', 'CIE JWKS URI', array($this, 'render_text_field'), $this->plugin_name . '_providers', 'providers_section', ['id' => 'cie_jwks_uri', 'placeholder' => 'https://...', 'desc' => 'Usato solo in modalità manual.']);
+        add_settings_field('cie_userinfo_endpoint', 'CIE UserInfo endpoint', array($this, 'render_text_field'), $this->plugin_name . '_providers', 'providers_section', ['id' => 'cie_userinfo_endpoint', 'placeholder' => 'https://...', 'desc' => 'Opzionale.']);
+        add_settings_field('cie_end_session_endpoint', 'CIE End Session endpoint', array($this, 'render_text_field'), $this->plugin_name . '_providers', 'providers_section', ['id' => 'cie_end_session_endpoint', 'placeholder' => 'https://...', 'desc' => 'Opzionale.']);
 
         // --- 4. DISCLAIMER ---
         add_settings_section('disclaimer_section', '4. Gestione Avvisi (Disclaimer)', null, $this->plugin_name . '_disclaimer');
@@ -325,6 +375,25 @@ class WP_SPID_CIE_OIDC_Admin {
         echo "<label><input type='checkbox' name='{$this->plugin_name}_options[$id]' value='1' $checked> $desc</label>";
     }
 	
+    public function render_select_field( $args ) {
+        $options = get_option( $this->plugin_name . '_options' );
+        $id = $args['id'];
+        $choices = $args['options'] ?? [];
+        $default = $args['default'] ?? '';
+        $val = isset($options[$id]) ? (string) $options[$id] : (string) $default;
+        $desc = $args['desc'] ?? '';
+
+        echo "<select name='{$this->plugin_name}_options[$id]'>";
+        foreach ($choices as $k => $label) {
+            $selected = selected($val, (string) $k, false);
+            echo "<option value='" . esc_attr($k) . "' $selected>" . esc_html($label) . "</option>";
+        }
+        echo "</select>";
+        if ($desc) {
+            echo "<p class='description'>" . esc_html($desc) . "</p>";
+        }
+    }
+
 	public function render_public_key_field() {
 		$upload_dir = wp_upload_dir();
 		$keys_dir = trailingslashit($upload_dir['basedir']) . 'spid-cie-oidc-keys';
@@ -427,13 +496,22 @@ class WP_SPID_CIE_OIDC_Admin {
 		);
 	}
 	
+    private function get_role_options(): array {
+        $roles = wp_roles()->roles;
+        $out = [];
+        foreach ($roles as $key => $role) {
+            $out[$key] = translate_user_role($role['name']);
+        }
+        return $out;
+    }
+
     public function sanitize_options( $input ) {
         $new_input = [];
-        $text_fields = ['organization_name', 'ipa_code', 'fiscal_number', 'contacts_email', 'cie_trust_anchor_preprod', 'cie_trust_anchor_prod', 'spid_trust_anchor'];
+        $text_fields = ['organization_name', 'ipa_code', 'fiscal_number', 'contacts_email', 'cie_trust_anchor_preprod', 'cie_trust_anchor_prod', 'spid_trust_anchor', 'spid_scope', 'cie_scope', 'spid_acr_values', 'cie_acr_values', 'min_loa'];
         foreach ($text_fields as $f) {
             if (isset($input[$f])) { $new_input[$f] = sanitize_text_field($input[$f]); }
         }
-        $checkboxes = ['spid_enabled', 'cie_enabled', 'spid_test_env', 'disclaimer_enabled'];
+        $checkboxes = ['spid_enabled', 'cie_enabled', 'spid_test_env', 'disclaimer_enabled', 'auto_provisioning'];
         foreach ($checkboxes as $c) {
             $new_input[$c] = (isset($input[$c]) && $input[$c] === '1') ? '1' : '0';
         }
@@ -448,6 +526,31 @@ class WP_SPID_CIE_OIDC_Admin {
 				$new_input[$f] = trim( sanitize_textarea_field( $input[$f] ) );
 			}
 		}
+
+        $url_fields = [
+            'spid_issuer', 'cie_issuer',
+            'spid_authorization_endpoint', 'spid_token_endpoint', 'spid_jwks_uri', 'spid_userinfo_endpoint', 'spid_end_session_endpoint',
+            'cie_authorization_endpoint', 'cie_token_endpoint', 'cie_jwks_uri', 'cie_userinfo_endpoint', 'cie_end_session_endpoint'
+        ];
+        foreach ($url_fields as $f) {
+            if (isset($input[$f])) {
+                $new_input[$f] = esc_url_raw(trim((string) $input[$f]));
+            }
+        }
+
+        $provider_mode = isset($input['provider_mode']) ? sanitize_key($input['provider_mode']) : 'both';
+        $new_input['provider_mode'] = in_array($provider_mode, ['both', 'spid_only', 'cie_only'], true) ? $provider_mode : 'both';
+
+        $discovery_mode = isset($input['discovery_mode']) ? sanitize_key($input['discovery_mode']) : 'auto';
+        $new_input['discovery_mode'] = in_array($discovery_mode, ['auto', 'manual'], true) ? $discovery_mode : 'auto';
+
+        $loa = isset($input['min_loa']) ? sanitize_text_field($input['min_loa']) : 'SpidL2';
+        $new_input['min_loa'] = in_array($loa, ['SpidL1', 'SpidL2', 'SpidL3'], true) ? $loa : 'SpidL2';
+
+
+        $role = isset($input['default_role']) ? sanitize_key($input['default_role']) : get_option('default_role', 'subscriber');
+        $new_input['default_role'] = get_role($role) ? $role : get_option('default_role', 'subscriber');
+
         return $new_input;
     }
 }
