@@ -23,6 +23,7 @@ class WP_SPID_CIE_OIDC_Public {
         add_action( 'init', array( $this, 'setup_federation_endpoints' ) );
         add_action( 'template_redirect', array( $this, 'serve_federation_endpoints' ) );
         add_action( 'template_redirect', array( $this, 'handle_login_flow' ) );
+		add_filter('redirect_canonical', array($this, 'disable_canonical_for_federation'), 10, 2);
     }
 
     public function enqueue_styles() {
@@ -54,9 +55,10 @@ class WP_SPID_CIE_OIDC_Public {
     }
 
     public function setup_federation_endpoints() {
-        add_rewrite_rule('^\.well-known/openid-federation/?$', 'index.php?oidc_federation=config', 'top');
-        add_rewrite_rule('^jwks.json/?$', 'index.php?oidc_federation=jwks', 'top');
-        
+		add_rewrite_rule('^\.well-known/openid-federation/?$', 'index.php?oidc_federation=config', 'top');
+		add_rewrite_rule('^\.wellknown/openid-federation/?$',   'index.php?oidc_federation=config', 'top'); // alias (senza "-")
+		add_rewrite_rule('^jwks.json/?$',                       'index.php?oidc_federation=jwks',   'top');
+
         add_filter( 'query_vars', function( $vars ) {
             $vars[] = 'oidc_federation';
             $vars[] = 'oidc_action';
@@ -65,38 +67,95 @@ class WP_SPID_CIE_OIDC_Public {
             return $vars;
         });
     }
+	
+	public function disable_canonical_for_federation($redirect_url, $requested_url) {
+			if (strpos($requested_url, '/.well-known/openid-federation') !== false) return false;
+			if (strpos($requested_url, '/.wellknown/openid-federation') !== false) return false;
+			if (strpos($requested_url, '/jwks.json') !== false) return false;
+			return $redirect_url;
+	}	
 
     public function serve_federation_endpoints() {
-        global $wp_query;
-        $action = $wp_query->get('oidc_federation');
+		global $wp_query;
 
-        if ( ! $action ) return;
+		$action = $wp_query->get('oidc_federation');
+		if ( ! $action ) {
+			return;
+		}
 
-        if (!class_exists('WP_SPID_CIE_OIDC_Factory')) {
-            require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/class-wp-spid-cie-oidc-factory.php';
-        }
+		// Per questi endpoint l'output deve essere "pulito":
+		// niente Notice/Deprecated/HTML che romperebbero JWT/JSON
+		@ini_set('display_errors', '0');
+		@ini_set('log_errors', '1');
+		error_reporting(0);
 
-        try {
-            $client = WP_SPID_CIE_OIDC_Factory::get_client();
+		// Svuota qualsiasi buffer già aperto (tema/plugin)
+		while (ob_get_level() > 0) {
+			@ob_end_clean();
+		}
 
-            if ( $action === 'config' ) {
-                $jws = $client->getEntityStatement();
-                header('Content-Type: application/entity-statement+jwt');
-                echo $jws;
-                exit;
-            } 
-            elseif ( $action === 'jwks' ) {
-                $jwks = $client->getJwks();
-                header('Content-Type: application/json');
-                echo $jwks;
-                exit;
-            }
+		// Log hits (senza dipendere dal Factory)
+		$uploads = wp_upload_dir();
+		$keyDir  = trailingslashit($uploads['basedir']) . 'spid-cie-oidc-keys';
+		if ( ! is_dir($keyDir) ) {
+			@wp_mkdir_p($keyDir);
+		}
+		@file_put_contents(
+			$keyDir . '/hits.log',
+			'[' . gmdate('c') . '] action=' . $action . ' host=' . ($_SERVER['HTTP_HOST'] ?? '') . ' uri=' . ($_SERVER['REQUEST_URI'] ?? '') . "\n",
+			FILE_APPEND
+		);
 
-        } catch (Exception $e) {
-            wp_die('Errore OIDC Federation: ' . esc_html($e->getMessage()), 'Errore OIDC', ['response' => 500]);
-        }
-    }
+		if ( ! class_exists('WP_SPID_CIE_OIDC_Factory') ) {
+			require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/class-wp-spid-cie-oidc-factory.php';
+		}
 
+		try {
+			$client = WP_SPID_CIE_OIDC_Factory::get_client();
+
+			nocache_headers();
+			status_header(200);
+
+			// evita che venga trattato come download
+			header_remove('Content-Disposition');
+			header('Content-Disposition: inline');
+			header('X-Content-Type-Options: nosniff');
+
+			if ( $action === 'config' ) {
+				$jws = $client->getEntityStatement();
+
+				header('Content-Type: application/entity-statement+jwt; charset=utf-8');
+				echo is_string($jws) ? $jws : (string) $jws;
+				exit;
+			}
+
+			if ( $action === 'jwks' ) {
+				$jwks = $client->getJwks();
+
+				header('Content-Type: application/jwk-set+json; charset=utf-8');
+
+				// se getJwks ritorna array, lo serializziamo in JSON
+				if (is_array($jwks) || is_object($jwks)) {
+					echo wp_json_encode($jwks);
+				} else {
+					echo (string) $jwks;
+				}
+				exit;
+			}
+
+			// azione non supportata
+			status_header(404);
+			header('Content-Type: text/plain; charset=utf-8');
+			echo 'Not found';
+			exit;
+
+		} catch (Exception $e) {
+			status_header(500);
+			header('Content-Type: text/plain; charset=utf-8');
+			echo 'Errore OIDC Federation: ' . $e->getMessage();
+			exit;
+		}
+	}
     public function handle_login_flow() {
         $action = isset($_GET['oidc_action']) ? $_GET['oidc_action'] : get_query_var('oidc_action');
         $provider = isset($_GET['provider']) ? $_GET['provider'] : get_query_var('provider');

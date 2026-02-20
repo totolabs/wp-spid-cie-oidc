@@ -147,7 +147,68 @@ class WP_SPID_CIE_OIDC_Admin {
         // --- 2. CRITTOGRAFIA ---
         add_settings_section('keys_section', '2. Crittografia e Federazione', array($this, 'print_keys_section_info'), $this->plugin_name . '_keys');
         add_settings_field('oidc_keys_manager', 'Stato Chiavi', array($this, 'render_keys_manager'), $this->plugin_name . '_keys', 'keys_section');
+		add_settings_field(
+		  'cie_trust_anchor_preprod',
+		  'Trust Anchor CIE (Pre-produzione)',
+		  array($this, 'render_text_field'),
+		  $this->plugin_name . '_keys',
+		  'keys_section',
+		  ['id' => 'cie_trust_anchor_preprod', 'desc' => 'URL Trust Anchor CIE pre-produzione', 'placeholder' => 'https://...']
+		);
+		add_settings_field(
+		  'cie_trust_anchor_prod',
+		  'Trust Anchor CIE (Produzione)',
+		  array($this, 'render_text_field'),
+		  $this->plugin_name . '_keys',
+		  'keys_section',
+		  ['id' => 'cie_trust_anchor_prod', 'desc' => 'URL Trust Anchor CIE produzione', 'placeholder' => 'https://...']
+		);
+		add_settings_field(
+		  'spid_trust_anchor',
+		  'Trust Anchor SPID (futuro)',
+		  array($this, 'render_text_field'),
+		  $this->plugin_name . '_keys',
+		  'keys_section',
+		  ['id' => 'spid_trust_anchor', 'desc' => 'URL Trust Anchor SPID (quando OIDC sarà operativo)', 'placeholder' => 'https://...']
+		);
+		add_settings_field(
+		  'cie_trust_mark_preprod',
+		  'Trust Mark CIE (Pre-produzione)',
+		  array($this, 'render_textarea_field'),
+		  $this->plugin_name . '_keys',
+		  'keys_section',
+		  ['id' => 'cie_trust_mark_preprod', 'desc' => 'Incolla qui il JWT Trust Mark rilasciato dal portale CIE pre-prod.']
+		);
+		add_settings_field(
+		  'cie_trust_mark_prod',
+		  'Trust Mark CIE (Produzione)',
+		  array($this, 'render_textarea_field'),
+		  $this->plugin_name . '_keys',
+		  'keys_section',
+		  ['id' => 'cie_trust_mark_prod', 'desc' => 'Incolla qui il JWT Trust Mark rilasciato dal portale CIE prod.']
+		);
+		add_settings_field(
+		  'public_key_pem',
+		  'Chiave pubblica di federazione (PEM)',
+		  array($this, 'render_public_key_field'),
+		  $this->plugin_name . '_keys',
+		  'keys_section'
+		);
+		add_settings_field(
+		  'cie_certificate_pem',
+		  'Certificato pubblico (X.509) per portale CIE',
+		  array($this, 'render_cie_certificate_field'),
+		  $this->plugin_name . '_keys',
+		  'keys_section'
+		);
 
+		add_settings_field(
+		  'public_key_raw_pem',
+		  'Chiave pubblica (PEM) – raw',
+		  array($this, 'render_public_key_raw_field'),
+		  $this->plugin_name . '_keys',
+		  'keys_section'
+		);
         // --- 3. ATTIVAZIONE SERVIZI ---
         add_settings_section('providers_section', '3. Attivazione Servizi', null, $this->plugin_name . '_providers');
         
@@ -263,10 +324,112 @@ class WP_SPID_CIE_OIDC_Admin {
         $desc = $args['desc'] ?? '';
         echo "<label><input type='checkbox' name='{$this->plugin_name}_options[$id]' value='1' $checked> $desc</label>";
     }
+	
+	public function render_public_key_field() {
+		$upload_dir = wp_upload_dir();
+		$keys_dir = trailingslashit($upload_dir['basedir']) . 'spid-cie-oidc-keys';
 
+		$public_file = $keys_dir . '/public.crt';
+
+		if (!file_exists($public_file)) {
+			echo '<p style="color:#b32d2e;">Chiave pubblica non disponibile. Genera prima le chiavi.</p>';
+			return;
+		}
+
+		$public_pem = file_get_contents($public_file);
+		if (!$public_pem) {
+			echo '<p style="color:#b32d2e;">Impossibile leggere la chiave pubblica. Verifica permessi in uploads/spid-cie-oidc-keys.</p>';
+			return;
+		}
+
+		$id = 'wp_spid_cie_oidc_public_key_pem';
+
+		echo '<textarea id="'.esc_attr($id).'" class="large-text code" rows="8" readonly>'
+			. esc_textarea($public_pem)
+			. '</textarea>';
+
+		echo '<p><button type="button" class="button" onclick="(function(){const el=document.getElementById(\''.esc_js($id).'\'); el.select(); document.execCommand(\'copy\');})();">Copia</button></p>';
+
+		echo '<p class="description"><strong>Nota:</strong> se rigeneri le chiavi, devi aggiornare questa chiave anche sul portale CIE.</p>';
+	}
+	
+	private function get_keys_dir_path(): string {
+		$upload_dir = wp_upload_dir();
+		return trailingslashit($upload_dir['basedir']) . 'spid-cie-oidc-keys';
+	}
+
+	private function render_copyable_textarea(string $id, string $value, int $rows = 8, string $help = ''): void {
+		echo '<textarea id="'.esc_attr($id).'" class="large-text code" rows="'.intval($rows).'" readonly>'
+			. esc_textarea($value)
+			. '</textarea>';
+
+		echo '<p><button type="button" class="button" onclick="(function(){const el=document.getElementById(\''.esc_js($id).'\'); el.focus(); el.select(); document.execCommand(\'copy\');})();">Copia</button></p>';
+
+		if ($help) {
+			echo '<p class="description">'.$help.'</p>';
+		}
+	}
+
+	public function render_cie_certificate_field() {
+		$keys_dir = $this->get_keys_dir_path();
+		$cert_file = $keys_dir . '/public.crt';
+
+		if (!file_exists($cert_file)) {
+			echo '<p style="color:#b32d2e;">Certificato non disponibile. Genera prima le chiavi.</p>';
+			return;
+		}
+
+		$cert_pem = file_get_contents($cert_file);
+		if (!$cert_pem) {
+			echo '<p style="color:#b32d2e;">Impossibile leggere il certificato. Verifica permessi in uploads/spid-cie-oidc-keys.</p>';
+			return;
+		}
+
+		// Controllo "sanity": deve essere un CERTIFICATE
+		if (stripos($cert_pem, 'BEGIN CERTIFICATE') === false) {
+			echo '<p style="color:#b32d2e;"><strong>Attenzione:</strong> public.crt non sembra essere un certificato X.509 (BEGIN CERTIFICATE). Rigenera le chiavi con la nuova versione del plugin.</p>';
+			// Mostriamo comunque il contenuto per debug/copia
+		}
+
+		$help = '<strong>Da incollare nel portale Federazione CIE</strong> nel campo “Chiave pubblica di federazione”.'
+			  . '<br><strong>Nota:</strong> se rigeneri le chiavi, devi aggiornare anche questa chiave sul portale CIE.';
+
+		$this->render_copyable_textarea(
+			'wp_spid_cie_oidc_cert_pem',
+			$cert_pem,
+			10,
+			$help
+		);
+	}
+
+	public function render_public_key_raw_field() {
+		$keys_dir = $this->get_keys_dir_path();
+		$pub_file = $keys_dir . '/public.key';
+
+		if (!file_exists($pub_file)) {
+			echo '<p style="color:#b32d2e;">Public key non disponibile. Genera prima le chiavi.</p>';
+			return;
+		}
+
+		$pub_pem = file_get_contents($pub_file);
+		if (!$pub_pem) {
+			echo '<p style="color:#b32d2e;">Impossibile leggere la public key. Verifica permessi in uploads/spid-cie-oidc-keys.</p>';
+			return;
+		}
+
+		$help = 'Chiave pubblica “raw” (PEM). <em>Di solito NON va usata nel portale</em> (che preferisce il certificato X.509), ma è utile per debug o interoperabilità.';
+
+		$this->render_copyable_textarea(
+			'wp_spid_cie_oidc_public_key_raw',
+			$pub_pem,
+			8,
+			$help
+		);
+	}
+	
     public function sanitize_options( $input ) {
         $new_input = [];
-        $text_fields = ['organization_name', 'ipa_code', 'fiscal_number', 'contacts_email'];
+        $text_fields = ['organization_name', 'ipa_code', 'fiscal_number', 'contacts_email', 'cie_trust_anchor_preprod', 'cie_trust_anchor_prod', 'spid_trust_anchor'];
         foreach ($text_fields as $f) {
             if (isset($input[$f])) { $new_input[$f] = sanitize_text_field($input[$f]); }
         }
@@ -277,6 +440,14 @@ class WP_SPID_CIE_OIDC_Admin {
         if (isset($input['disclaimer_text'])) {
             $new_input['disclaimer_text'] = wp_kses_post($input['disclaimer_text']);
         }
+		// Trust Mark (JWT) - meglio non passarli in wp_kses_post
+		$tm_fields = ['cie_trust_mark_preprod', 'cie_trust_mark_prod'];
+		foreach ($tm_fields as $f) {
+			if (isset($input[$f])) {
+				// sanitize_textarea_field va bene (rimuove roba strana ma lascia caratteri JWT)
+				$new_input[$f] = trim( sanitize_textarea_field( $input[$f] ) );
+			}
+		}
         return $new_input;
     }
 }

@@ -19,7 +19,7 @@ class WP_SPID_CIE_OIDC_Factory {
     public static function get_client() {
         $options = get_option('wp-spid-cie-oidc_options');
         
-        $base_url = untrailingslashit(home_url());
+        $base_url = untrailingslashit( $options['issuer_override'] ?? home_url() );
 
         $config = [
             'organization_name' => $options['organization_name'] ?? get_bloginfo('name'),
@@ -27,7 +27,14 @@ class WP_SPID_CIE_OIDC_Factory {
             'fiscal_number'     => $options['fiscal_number'] ?? '',
             'contacts_email'    => $options['contacts_email'] ?? get_option('admin_email'),
             'base_url'          => $base_url,
-            'test_env'          => isset($options['spid_test_env']) && $options['spid_test_env'] === '1'
+            'test_env'          => isset($options['spid_test_env']) && $options['spid_test_env'] === '1',
+			'cie_trust_anchor_preprod' => $options['cie_trust_anchor_preprod'] ?? '',
+			'cie_trust_anchor_prod'    => $options['cie_trust_anchor_prod'] ?? '',
+			'spid_trust_anchor'        => $options['spid_trust_anchor'] ?? '',
+			'cie_trust_mark_preprod' => $options['cie_trust_mark_preprod'] ?? '',
+			'cie_trust_mark_prod'    => $options['cie_trust_mark_prod'] ?? '',
+			'spid_enabled' => !empty($options['spid_enabled']) && $options['spid_enabled'] === '1',
+			'cie_enabled'  => !empty($options['cie_enabled']) && $options['cie_enabled'] === '1'
         ];
 
         $upload_dir = wp_upload_dir();
@@ -93,13 +100,102 @@ class WP_SPID_CIE_OIDC_Wrapper {
         return $providers;
     }
 
-    public function generateKeys() {
-        $private = \phpseclib3\Crypt\RSA::createKey(2048);
-        $public = $private->getPublicKey();
-        file_put_contents($this->config['key_dir'] . '/private.key', (string)$private);
-        file_put_contents($this->config['key_dir'] . '/public.crt', (string)$public);
-        return true;
-    }
+	public function generateKeys() {
+		$keyDir = $this->config['key_dir'];
+		$logFile = $keyDir . '/debug.txt';
+		$log = function(string $msg) use ($logFile) {
+			@file_put_contents($logFile, '[' . gmdate('c') . '] ' . $msg . PHP_EOL, FILE_APPEND);
+		};
+
+		// Assicura cartella
+		if (!is_dir($keyDir)) {
+			wp_mkdir_p($keyDir);
+		}
+
+		// 1) Genera coppia RSA
+		$private = \phpseclib3\Crypt\RSA::createKey(2048);
+		$public  = $private->getPublicKey();
+
+		// Esporta in PEM (compatibile OpenSSL)
+		// PKCS8 è in genere il formato più interoperabile
+		$privatePem = $private->toString('PKCS1');
+		$publicPem  = $public->toString('PKCS8');
+
+		// 2) Salva private key
+		file_put_contents($keyDir . '/private.key', $privatePem);
+
+		// 3) Salva public key RAW (quella che oggi chiamavate public.crt)
+		file_put_contents($keyDir . '/public.key', $publicPem);
+
+		// 4) Genera CERTIFICATO X.509 autosigned e salvalo come public.crt (quello richiesto dal portale)
+		$cnHost = parse_url($this->config['base_url'] ?? home_url(), PHP_URL_HOST);
+		if (!$cnHost) {
+			$cnHost = 'localhost';
+		}
+
+		$cnHost = parse_url($this->config['base_url'] ?? home_url(), PHP_URL_HOST);
+		if (!$cnHost) { $cnHost = 'localhost'; }
+
+		//questa funzione accorcia il nome entro i 60 caratteri
+		$org = $this->config['organization_name'] ?? 'Service Provider';
+		$org = trim(preg_replace('/\s+/', ' ', $org));
+		if (strlen($org) > 60) { $org = substr($org, 0, 60); }
+
+		$cn = trim($cnHost);
+		if (strlen($cn) > 60) { $cn = substr($cn, 0, 60); }
+
+		$dn = [
+		  "countryName"      => "IT",
+		  "organizationName" => $org,
+		  "commonName"       => $cn,
+		];
+		
+		$certPem = null;
+
+		$log('generateKeys: OpenSSL loaded: ' . (extension_loaded('openssl') ? 'YES' : 'NO'));
+
+		$opensslPriv = openssl_pkey_get_private($privatePem);
+		if ($opensslPriv === false) {
+			$log('OpenSSL: pkey_get_private FAILED');
+			while ($msg = openssl_error_string()) {
+				$log('OpenSSL error (pkey_get_private): ' . $msg);
+			}
+		} else {
+			$log('OpenSSL: pkey_get_private OK');
+
+			$csr = openssl_csr_new($dn, $opensslPriv, ['digest_alg' => 'sha256']);
+			if ($csr === false) {
+				$log('OpenSSL: csr_new FAILED');
+				while ($msg = openssl_error_string()) {
+					$log('OpenSSL error (csr_new): ' . $msg);
+				}
+			} else {
+				$log('OpenSSL: csr_new OK');
+
+				$x509 = openssl_csr_sign($csr, null, $opensslPriv, 365, ['digest_alg' => 'sha256']);
+				if ($x509 === false) {
+					$log('OpenSSL: csr_sign FAILED');
+					while ($msg = openssl_error_string()) {
+						$log('OpenSSL error (csr_sign): ' . $msg);
+					}
+				} else {
+					$log('OpenSSL: csr_sign OK');
+
+					$ok = openssl_x509_export($x509, $certPem);
+					$log('OpenSSL: x509_export ' . ($ok ? 'OK' : 'FAILED'));
+				}
+			}
+		}
+
+		if (empty($certPem)) {
+			$log('generateKeys: certPem EMPTY -> returning false');
+			return false;
+		}
+
+		file_put_contents($keyDir . '/public.crt', $certPem);
+		$log('generateKeys: wrote public.crt (CERTIFICATE)');
+		return true;
+	}
 
     public function getJwks() {
         $jwk_item = $this->buildJwkItem();
@@ -109,7 +205,7 @@ class WP_SPID_CIE_OIDC_Wrapper {
 
     public function getEntityStatement() {
         $now = time();
-        $exp = $now + (86400 * 365); 
+        $exp = $now + 21600; // 6 ore 
         $sub = $this->config['base_url'];
         $jwk_item = $this->buildJwkItem();
         $jwks_structure = ['keys' => [$jwk_item]];
@@ -125,14 +221,50 @@ class WP_SPID_CIE_OIDC_Wrapper {
              $org_id_val = $this->config['fiscal_number'];
         }
         $org_identifier = "PA:IT-" . $org_id_val;
+		
+		$authority_hints = [];
 
+		// Includi TA CIE solo se CIE è abilitato
+		if (!empty($this->config['cie_enabled'])) {
+			if (!empty($this->config['cie_trust_anchor_preprod'])) {
+				$authority_hints[] = untrailingslashit($this->config['cie_trust_anchor_preprod']);
+			}
+			if (!empty($this->config['cie_trust_anchor_prod'])) {
+				$authority_hints[] = untrailingslashit($this->config['cie_trust_anchor_prod']);
+			}
+		}
+
+		// Includi TA SPID solo se SPID è abilitato
+		if (!empty($this->config['spid_enabled']) && !empty($this->config['spid_trust_anchor'])) {
+			$authority_hints[] = untrailingslashit($this->config['spid_trust_anchor']);
+		}
+
+		// Rimuovi duplicati e reindicizza
+		$authority_hints = array_values(array_unique($authority_hints));
+		
+		$trust_marks = [];
+
+		$tm_pre = trim($this->config['cie_trust_mark_preprod'] ?? '');
+		$tm_prod = trim($this->config['cie_trust_mark_prod'] ?? '');
+
+		foreach ([$tm_pre, $tm_prod] as $tm) {
+			if (!$tm) continue;
+
+			$id = $this->extract_trust_mark_id($tm);
+			if ($id) {
+				$trust_marks[] = [
+					'id' => $id,
+					'trust_mark' => $tm,
+				];
+			}
+		}	
         $payload = [
             "iss" => $sub,
             "sub" => $sub,
             "iat" => $now,
             "exp" => $exp,
             "jwks" => $jwks_structure,
-            "authority_hints" => [], 
+            "authority_hints" => $authority_hints, 
             "metadata" => [
                 "openid_relying_party" => [
                     "application_type" => "web",
@@ -147,7 +279,7 @@ class WP_SPID_CIE_OIDC_Wrapper {
                         add_query_arg(['oidc_action' => 'callback', 'provider' => 'cie'], $this->config['base_url'])
                     ],
                     "response_types" => ["code"],
-                    "subject_type" => "pairwise"
+                    "subject_type" => "public"
                 ],
                 "federation_entity" => [
                     "organization_name" => $this->config['organization_name'],
@@ -165,7 +297,29 @@ class WP_SPID_CIE_OIDC_Wrapper {
                 ]
             ]
         ];
+		
+		// --- Trust Marks (se presenti) ---
+		$trust_marks = [];
 
+		$tm_pre  = trim($this->config['cie_trust_mark_preprod'] ?? '');
+		$tm_prod = trim($this->config['cie_trust_mark_prod'] ?? '');
+
+		foreach ([$tm_pre, $tm_prod] as $tm) {
+			if (!$tm) continue;
+
+			$id = $this->extract_trust_mark_id($tm);
+			if ($id) {
+				$trust_marks[] = [
+					'id' => $id,
+					'trust_mark' => $tm,
+				];
+			}
+		}
+
+		if (!empty($trust_marks)) {
+			$payload['trust_marks'] = $trust_marks;
+		}
+		
         return $this->signJwt($payload);
     }
 
@@ -311,4 +465,19 @@ class WP_SPID_CIE_OIDC_Wrapper {
     private function generateCodeChallenge($verifier) {
         return $this->base64url_encode(hash('sha256', $verifier, true));
     }
+	private function extract_trust_mark_id(string $jwt): ?string {
+    $parts = explode('.', $jwt);
+    if (count($parts) < 2) return null;
+
+    $payload_b64 = strtr($parts[1], '-_', '+/');
+    $payload_b64 .= str_repeat('=', (4 - strlen($payload_b64) % 4) % 4);
+
+    $json = base64_decode($payload_b64);
+    if (!$json) return null;
+
+    $data = json_decode($json, true);
+    if (!is_array($data)) return null;
+
+    return isset($data['id']) && is_string($data['id']) ? $data['id'] : null;
+	}
 }

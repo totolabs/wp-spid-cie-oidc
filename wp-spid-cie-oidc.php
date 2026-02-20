@@ -64,5 +64,39 @@ function run_wp_spid_cie_oidc() {
 
 }
 
+/**
+ * Imposta valori di default alla prima attivazione.
+ */
+function wp_spid_cie_oidc_activate() {
+    $option_name = 'wp-spid-cie-oidc_options';
+    $options = get_option($option_name, []);
+
+    // Imposta i default solo se il campo è vuoto/non esiste
+    $defaults = [
+        'cie_trust_anchor_preprod' => 'https://registry.interno.gov.it/',
+        'cie_trust_anchor_prod'    => 'https://registry.interno.gov.it/',
+        'spid_trust_anchor'        => 'https://registry.agid.gov.it/',
+    ];
+
+    $updated = false;
+    foreach ($defaults as $k => $v) {
+        if (empty($options[$k])) {
+            $options[$k] = $v;
+            $updated = true;
+        }
+    }
+
+    if ($updated) {
+        update_option($option_name, $options);
+    }
+}
+
+register_activation_hook(__FILE__, 'wp_spid_cie_oidc_activate');
+
+add_action('plugins_loaded', function () {
+    // Imposta i default anche su installazioni già attive (upgrade-safe)
+    wp_spid_cie_oidc_activate();
+});
+
 // Avvia tutto
 run_wp_spid_cie_oidc();
