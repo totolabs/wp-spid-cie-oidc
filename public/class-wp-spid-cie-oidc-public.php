@@ -80,7 +80,15 @@ class WP_SPID_CIE_OIDC_Public {
 
 		$action = $wp_query->get('oidc_federation');
 		if ( ! $action ) {
-			return;
+			$path = parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH);
+			$path = '/' . ltrim((string) $path, '/');
+			if ($path === '/.well-known/openid-federation' || $path === '/.wellknown/openid-federation') {
+				$action = 'config';
+			} elseif ($path === '/jwks.json') {
+				$action = 'jwks';
+			} else {
+				return;
+			}
 		}
 
 		// Per questi endpoint l'output deve essere "pulito":
