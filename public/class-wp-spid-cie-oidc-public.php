@@ -124,6 +124,10 @@ class WP_SPID_CIE_OIDC_Public {
 
 		try {
 			$client = WP_SPID_CIE_OIDC_Factory::get_client();
+			$entity_id = method_exists($client, 'getEntityId') ? (string) $client->getEntityId() : '';
+			$remote_ip = isset($_SERVER['REMOTE_ADDR']) ? (string) $_SERVER['REMOTE_ADDR'] : '';
+			$user_agent = isset($_SERVER['HTTP_USER_AGENT']) ? (string) $_SERVER['HTTP_USER_AGENT'] : '';
+			@error_log('[wp-spid-cie-oidc federation] action=' . $action . ' path=' . ($_SERVER['REQUEST_URI'] ?? '') . ' ip=' . $remote_ip . ' ua=' . $user_agent . ' entity_id=' . $entity_id);
 
 			nocache_headers();
 			status_header(200);
@@ -132,6 +136,9 @@ class WP_SPID_CIE_OIDC_Public {
 			header_remove('Content-Disposition');
 			header('Content-Disposition: inline');
 			header('X-Content-Type-Options: nosniff');
+			if (defined('WP_DEBUG') && WP_DEBUG && !empty($entity_id)) {
+				header('X-SPIDCIE-Entity-ID: ' . $entity_id);
+			}
 
 			if ( $action === 'config' ) {
 				$jws = $client->getEntityStatement();

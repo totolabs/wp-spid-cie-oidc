@@ -23,12 +23,17 @@ class WP_SPID_CIE_OIDC_Factory {
         $base_source = $issuer_override !== '' ? $issuer_override : home_url();
         $base_url = untrailingslashit(set_url_scheme((string) $base_source, 'https'));
 
+        $entity_id_override = isset($options['entity_id']) ? trim((string) $options['entity_id']) : '';
+        $entity_id_source = $entity_id_override !== '' ? $entity_id_override : ($issuer_override !== '' ? $issuer_override : home_url('/'));
+        $entity_id = set_url_scheme((string) $entity_id_source, 'https');
+
         $config = [
             'organization_name' => $options['organization_name'] ?? get_bloginfo('name'),
             'ipa_code'          => $options['ipa_code'] ?? '',
             'fiscal_number'     => $options['fiscal_number'] ?? '',
             'contacts_email'    => $options['contacts_email'] ?? get_option('admin_email'),
             'base_url'          => $base_url,
+            'entity_id'         => $entity_id,
             'test_env'          => isset($options['spid_test_env']) && $options['spid_test_env'] === '1',
 			'cie_trust_anchor_preprod' => $options['cie_trust_anchor_preprod'] ?? '',
 			'cie_trust_anchor_prod'    => $options['cie_trust_anchor_prod'] ?? '',
@@ -239,7 +244,7 @@ class WP_SPID_CIE_OIDC_Wrapper {
     public function getEntityStatement() {
         $now = time();
         $exp = $now + 21600; // 6 ore 
-        $sub = trim((string) ($this->config['base_url'] ?? ''));
+        $sub = trim((string) ($this->config['entity_id'] ?? $this->config['base_url'] ?? ''));
         if ($sub === '') {
             throw new Exception('Issuer base_url non configurato');
         }
@@ -247,11 +252,12 @@ class WP_SPID_CIE_OIDC_Wrapper {
         $jwk_item = $this->buildJwkItem();
         $jwks_structure = ['keys' => [$jwk_item]];
 
-        $fed_api = $this->config['base_url'] . '/.well-known/openid-federation';
-        $resolve = $this->config['base_url'] . '/resolve';
-        $fetch   = $this->config['base_url'] . '/fetch';
-        $list    = $this->config['base_url'] . '/list';
-        $status  = $this->config['base_url'] . '/trust_mark_status';
+        $endpoint_base = untrailingslashit((string) ($this->config['base_url'] ?? $sub));
+        $fed_api = $endpoint_base . '/.well-known/openid-federation';
+        $resolve = $endpoint_base . '/resolve';
+        $fetch   = $endpoint_base . '/fetch';
+        $list    = $endpoint_base . '/list';
+        $status  = $endpoint_base . '/trust_mark_status';
 
         $org_id_val = $this->config['ipa_code'];
         if (!empty($this->config['fiscal_number'])) {
@@ -312,17 +318,17 @@ class WP_SPID_CIE_OIDC_Wrapper {
                     "contacts" => [$this->config['contacts_email']],
                     "grant_types" => ["authorization_code", "refresh_token"],
                     "redirect_uris" => [
-                        add_query_arg(['oidc_action' => 'callback', 'provider' => 'spid'], $this->config['base_url']),
-                        add_query_arg(['oidc_action' => 'callback', 'provider' => 'cie'], $this->config['base_url'])
+                        add_query_arg(['oidc_action' => 'callback', 'provider' => 'spid'], $endpoint_base),
+                        add_query_arg(['oidc_action' => 'callback', 'provider' => 'cie'], $endpoint_base)
                     ],
                     "response_types" => ["code"],
                     "subject_type" => "public"
                 ],
                 "federation_entity" => [
                     "organization_name" => $this->config['organization_name'],
-                    "homepage_uri" => $this->config['base_url'],
-                    "policy_uri" => $this->config['base_url'] . '/privacy-policy', 
-                    "logo_uri" => $this->config['base_url'] . '/wp-admin/images/w-logo-blue.png',
+                    "homepage_uri" => $endpoint_base,
+                    "policy_uri" => $endpoint_base . '/privacy-policy', 
+                    "logo_uri" => $endpoint_base . '/wp-admin/images/w-logo-blue.png',
                     "contacts" => [$this->config['contacts_email']],
                     "federation_api_endpoint" => $fed_api,
                     "federation_resolve_endpoint" => $resolve,
@@ -365,7 +371,7 @@ class WP_SPID_CIE_OIDC_Wrapper {
      * Ritorna un resolve-response+jwt firmato con la stessa chiave federativa.
      */
     public function getResolveResponse($sub = '', $trust_anchor = '') {
-        $base_sub = trim((string) ($this->config['base_url'] ?? ''));
+        $base_sub = trim((string) ($this->config['entity_id'] ?? $this->config['base_url'] ?? ''));
         if ($base_sub === '') {
             throw new Exception('Issuer base_url non configurato');
         }
@@ -380,11 +386,12 @@ class WP_SPID_CIE_OIDC_Wrapper {
         $jwk_item = $this->buildJwkItem();
         $jwks_structure = ['keys' => [$jwk_item]];
 
-        $fed_api = $base_sub . '/.well-known/openid-federation';
-        $resolve = $base_sub . '/resolve';
-        $fetch   = $base_sub . '/fetch';
-        $list    = $base_sub . '/list';
-        $status  = $base_sub . '/trust_mark_status';
+        $endpoint_base = untrailingslashit((string) ($this->config['base_url'] ?? $base_sub));
+        $fed_api = $endpoint_base . '/.well-known/openid-federation';
+        $resolve = $endpoint_base . '/resolve';
+        $fetch   = $endpoint_base . '/fetch';
+        $list    = $endpoint_base . '/list';
+        $status  = $endpoint_base . '/trust_mark_status';
 
         $org_id_val = $this->config['ipa_code'];
         if (!empty($this->config['fiscal_number'])) {
@@ -408,17 +415,17 @@ class WP_SPID_CIE_OIDC_Wrapper {
                     'contacts' => [$this->config['contacts_email']],
                     'grant_types' => ['authorization_code', 'refresh_token'],
                     'redirect_uris' => [
-                        add_query_arg(['oidc_action' => 'callback', 'provider' => 'spid'], $base_sub),
-                        add_query_arg(['oidc_action' => 'callback', 'provider' => 'cie'], $base_sub)
+                        add_query_arg(['oidc_action' => 'callback', 'provider' => 'spid'], $endpoint_base),
+                        add_query_arg(['oidc_action' => 'callback', 'provider' => 'cie'], $endpoint_base)
                     ],
                     'response_types' => ['code'],
                     'subject_type' => 'public'
                 ],
                 'federation_entity' => [
                     'organization_name' => $this->config['organization_name'],
-                    'homepage_uri' => $base_sub,
-                    'policy_uri' => $base_sub . '/privacy-policy',
-                    'logo_uri' => $base_sub . '/wp-admin/images/w-logo-blue.png',
+                    'homepage_uri' => $endpoint_base,
+                    'policy_uri' => $endpoint_base . '/privacy-policy',
+                    'logo_uri' => $endpoint_base . '/wp-admin/images/w-logo-blue.png',
                     'contacts' => [$this->config['contacts_email']],
                     'federation_api_endpoint' => $fed_api,
                     'federation_resolve_endpoint' => $resolve,
@@ -437,6 +444,15 @@ class WP_SPID_CIE_OIDC_Wrapper {
         }
 
         return $this->signGenericJwt($payload, 'resolve-response+jwt');
+    }
+
+
+    public function getEntityId() {
+        $entity_id = trim((string) ($this->config['entity_id'] ?? ''));
+        if ($entity_id !== '') {
+            return $entity_id;
+        }
+        return trim((string) ($this->config['base_url'] ?? ''));
     }
 
     /**
