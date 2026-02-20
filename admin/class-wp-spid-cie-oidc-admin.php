@@ -143,6 +143,9 @@ class WP_SPID_CIE_OIDC_Admin {
         add_settings_field('contacts_email', 'Email Contatto Tecnico', array($this, 'render_text_field'), $this->plugin_name . '_ente', 'ente_section', 
             ['id' => 'contacts_email', 'type' => 'email', 'desc' => 'Email per comunicazioni tecniche.', 'placeholder' => 'ced@ente.it']
         );
+        add_settings_field('issuer_override', 'Issuer / Identificativo componente', array($this, 'render_text_field'), $this->plugin_name . '_ente', 'ente_section',
+            ['id' => 'issuer_override', 'desc' => 'URL base HTTPS usato come iss/sub/client_id nei metadata OIDC Federation (deve coincidere con il portale CIE).', 'placeholder' => 'https://demo.ente.it']
+        );
 
         // --- 2. CRITTOGRAFIA ---
         add_settings_section('keys_section', '2. Crittografia e Federazione', array($this, 'print_keys_section_info'), $this->plugin_name . '_keys');
@@ -328,7 +331,9 @@ class WP_SPID_CIE_OIDC_Admin {
 
         if ($keys_exist) {
             echo '<hr>';
-            $federation_url = home_url('/.well-known/openid-federation');
+            $options = get_option( $this->plugin_name . '_options', [] );
+            $base = !empty($options['issuer_override']) ? untrailingslashit($options['issuer_override']) : home_url();
+            $federation_url = $base . '/.well-known/openid-federation';
             echo '<label for="entity_statement_uri"><strong>Entity Statement URI (Metadata OIDC):</strong></label>';
             echo '<p class="description">Copia questo URL per la registrazione sui portali AgID e Federazione CIE.</p>';
             echo '<input type="text" id="entity_statement_uri" readonly class="large-text code" value="' . esc_url($federation_url) . '" onclick="this.select();">';
@@ -528,6 +533,7 @@ class WP_SPID_CIE_OIDC_Admin {
 		}
 
         $url_fields = [
+            'issuer_override',
             'spid_issuer', 'cie_issuer',
             'spid_authorization_endpoint', 'spid_token_endpoint', 'spid_jwks_uri', 'spid_userinfo_endpoint', 'spid_end_session_endpoint',
             'cie_authorization_endpoint', 'cie_token_endpoint', 'cie_jwks_uri', 'cie_userinfo_endpoint', 'cie_end_session_endpoint'
