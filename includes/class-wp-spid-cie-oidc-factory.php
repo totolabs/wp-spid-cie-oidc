@@ -258,6 +258,7 @@ class WP_SPID_CIE_OIDC_Wrapper {
         $fetch   = $endpoint_base . '/fetch';
         $list    = $endpoint_base . '/list';
         $status  = $endpoint_base . '/trust_mark_status';
+        $jwks_uri = $endpoint_base . '/jwks.json';
 
         $org_id_val = $this->config['ipa_code'];
         if (!empty($this->config['fiscal_number'])) {
@@ -314,6 +315,7 @@ class WP_SPID_CIE_OIDC_Wrapper {
                     "client_id" => $sub,
                     "client_registration_types" => ["automatic"],
                     "jwks" => $jwks_structure,
+                    "jwks_uri" => $jwks_uri,
                     "client_name" => $this->config['organization_name'],
                     "contacts" => [$this->config['contacts_email']],
                     "grant_types" => ["authorization_code", "refresh_token"],
@@ -392,6 +394,7 @@ class WP_SPID_CIE_OIDC_Wrapper {
         $fetch   = $endpoint_base . '/fetch';
         $list    = $endpoint_base . '/list';
         $status  = $endpoint_base . '/trust_mark_status';
+        $jwks_uri = $endpoint_base . '/jwks.json';
 
         $org_id_val = $this->config['ipa_code'];
         if (!empty($this->config['fiscal_number'])) {
@@ -411,6 +414,7 @@ class WP_SPID_CIE_OIDC_Wrapper {
                     'client_id' => $base_sub,
                     'client_registration_types' => ['automatic'],
                     'jwks' => $jwks_structure,
+                    'jwks_uri' => $jwks_uri,
                     'client_name' => $this->config['organization_name'],
                     'contacts' => [$this->config['contacts_email']],
                     'grant_types' => ['authorization_code', 'refresh_token'],
@@ -542,10 +546,21 @@ class WP_SPID_CIE_OIDC_Wrapper {
         $key = \phpseclib3\Crypt\PublicKeyLoader::load($crt_content);
         $jwk_native = json_decode($key->toString('JWK'), true);
         if (isset($jwk_native['keys'][0])) $jwk_native = $jwk_native['keys'][0];
-        return [
+        $jwk = [
             'kty' => 'RSA', 'n' => $jwk_native['n'], 'e' => $jwk_native['e'], 
             'alg' => 'RS256', 'use' => 'sig', 'kid' => $this->getKid()
         ];
+
+        $x5c = $this->buildX5cFromCertificate();
+        if (!empty($x5c)) {
+            $jwk['x5c'] = [$x5c];
+            $der = base64_decode($x5c);
+            if ($der !== false) {
+                $jwk['x5t#S256'] = $this->base64url_encode(hash('sha256', $der, true));
+            }
+        }
+
+        return $jwk;
     }
 
     // Firma Metadata (entity-statement+jwt)
@@ -574,6 +589,16 @@ class WP_SPID_CIE_OIDC_Wrapper {
         $signature = $rsa->sign($base64UrlHeader . "." . $base64UrlPayload);
         
         return $base64UrlHeader . "." . $base64UrlPayload . "." . $this->base64url_encode($signature);
+    }
+
+    private function buildX5cFromCertificate() {
+        $crt = file_get_contents($this->config['key_dir'] . '/public.crt');
+        if (!$crt) {
+            return null;
+        }
+
+        $clean = preg_replace('/-----BEGIN CERTIFICATE-----|-----END CERTIFICATE-----|\s+/', '', (string) $crt);
+        return $clean !== '' ? $clean : null;
     }
 
     private function getKid() {

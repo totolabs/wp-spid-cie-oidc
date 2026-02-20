@@ -142,9 +142,28 @@ class WP_SPID_CIE_OIDC_Public {
 
 			if ( $action === 'config' ) {
 				$jws = $client->getEntityStatement();
+				$payload = $this->extract_jwt_payload((string) $jws);
+				if (is_array($payload)) {
+					@error_log('[wp-spid-cie-oidc federation] entity-config iss=' . ($payload['iss'] ?? '') . ' sub=' . ($payload['sub'] ?? '') . ' client_id=' . ($payload['metadata']['openid_relying_party']['client_id'] ?? ''));
+				}
 
-				header('Content-Type: application/entity-statement+jwt; charset=utf-8');
-				echo is_string($jws) ? $jws : (string) $jws;
+				$debug_mode = isset($_GET['debug']) && $_GET['debug'] === '1';
+				if ($debug_mode && defined('WP_DEBUG') && WP_DEBUG && current_user_can('manage_options')) {
+					header('Content-Type: application/json; charset=utf-8');
+					echo wp_json_encode([
+						'entity_id_configured' => $entity_id,
+						'iss' => is_array($payload) ? ($payload['iss'] ?? '') : '',
+						'sub' => is_array($payload) ? ($payload['sub'] ?? '') : '',
+						'client_id' => is_array($payload) ? ($payload['metadata']['openid_relying_party']['client_id'] ?? '') : '',
+						'metadata_url' => home_url('/.well-known/openid-federation'),
+						'resolve_url' => home_url('/resolve'),
+						'note' => 'Debug enabled via ?debug=1 (WP_DEBUG + admin only)'
+					], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+					exit;
+				}
+
+				header('Content-Type: application/entity-statement+jwt');
+				echo trim(is_string($jws) ? $jws : (string) $jws);
 				exit;
 			}
 
@@ -167,8 +186,8 @@ class WP_SPID_CIE_OIDC_Public {
 				$trust_anchor = isset($_GET['trust_anchor']) ? esc_url_raw(wp_unslash($_GET['trust_anchor'])) : '';
 				$jws = $client->getResolveResponse($sub, $trust_anchor);
 
-				header('Content-Type: application/resolve-response+jwt; charset=utf-8');
-				echo is_string($jws) ? $jws : (string) $jws;
+				header('Content-Type: application/resolve-response+jwt');
+				echo trim(is_string($jws) ? $jws : (string) $jws);
 				exit;
 			}
 
@@ -185,6 +204,24 @@ class WP_SPID_CIE_OIDC_Public {
 			exit;
 		}
 	}
+
+    private function extract_jwt_payload($jwt) {
+        $parts = explode('.', trim((string) $jwt));
+        if (count($parts) < 2) {
+            return null;
+        }
+
+        $payload_b64 = strtr($parts[1], '-_', '+/');
+        $payload_b64 .= str_repeat('=', (4 - strlen($payload_b64) % 4) % 4);
+        $json = base64_decode($payload_b64, true);
+        if ($json === false) {
+            return null;
+        }
+
+        $payload = json_decode($json, true);
+        return is_array($payload) ? $payload : null;
+    }
+
     public function handle_login_flow() {
         $action = isset($_GET['oidc_action']) ? sanitize_key(wp_unslash($_GET['oidc_action'])) : get_query_var('oidc_action');
         $provider = isset($_GET['provider']) ? sanitize_key(wp_unslash($_GET['provider'])) : get_query_var('provider');
