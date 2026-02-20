@@ -157,27 +157,147 @@ class WP_SPID_CIE_OIDC_Public {
 		}
 	}
     public function handle_login_flow() {
-        $action = isset($_GET['oidc_action']) ? $_GET['oidc_action'] : get_query_var('oidc_action');
-        $provider = isset($_GET['provider']) ? $_GET['provider'] : get_query_var('provider');
-        $idp = isset($_GET['idp']) ? $_GET['idp'] : get_query_var('idp');
-        
-        if ( $action !== 'login' || ! $provider ) return;
+        $action = isset($_GET['oidc_action']) ? sanitize_key(wp_unslash($_GET['oidc_action'])) : get_query_var('oidc_action');
+        $provider = isset($_GET['provider']) ? sanitize_key(wp_unslash($_GET['provider'])) : get_query_var('provider');
+        $idp = isset($_GET['idp']) ? sanitize_key(wp_unslash($_GET['idp'])) : get_query_var('idp');
+
+        if (!in_array($action, ['login', 'callback'], true) || !in_array($provider, ['spid', 'cie'], true)) {
+            return;
+        }
 
         if (!class_exists('WP_SPID_CIE_OIDC_Factory')) {
             require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/class-wp-spid-cie-oidc-factory.php';
         }
 
-        try {
-            $client = WP_SPID_CIE_OIDC_Factory::get_client();
-            $trust_anchor = ($provider === 'cie') ? 'cie' : 'spid';
-            $auth_url = $client->getAuthorizationUrl($trust_anchor, $idp);
-            
-            wp_redirect($auth_url);
-            exit;
+        $runtime = WP_SPID_CIE_OIDC_Factory::get_runtime_services();
+        /** @var WP_SPID_CIE_OIDC_Logger $logger */
+        $logger = $runtime['logger'];
+        /** @var WP_SPID_CIE_OIDC_OidcClient $oidc */
+        $oidc = $runtime['oidc_client'];
+        /** @var WP_SPID_CIE_OIDC_WpUserMapper $userMapper */
+        $userMapper = $runtime['user_mapper'];
+        /** @var WP_SPID_CIE_OIDC_WpAuthService $authService */
+        $authService = $runtime['auth_service'];
+        $correlation_id = $logger->generateCorrelationId();
 
-        } catch (Exception $e) {
-            wp_die("Errore durante l'avvio del login: " . esc_html($e->getMessage()));
+        $registry = WP_SPID_CIE_OIDC_Factory::get_provider_registry();
+        $provider_config = $registry->resolveConfig($provider, $idp);
+        if (is_wp_error($provider_config)) {
+            $logger->error('OIDC provider config resolution failed', [
+                'correlation_id' => $correlation_id,
+                'provider' => $provider,
+                'error_code' => $provider_config->get_error_code(),
+            ]);
+            $this->redirect_to_login_error($provider_config->get_error_code());
         }
+
+        if ($action === 'login') {
+            $target_url = $this->resolve_redirect_target();
+            $auth_url = $oidc->buildAuthorizationUrl($provider_config, $target_url, $correlation_id);
+            if (is_wp_error($auth_url)) {
+                $logger->error('OIDC start login failed', [
+                    'correlation_id' => $correlation_id,
+                    'provider' => $provider,
+                    'error_code' => $auth_url->get_error_code(),
+                ]);
+                $this->redirect_to_login_error('oidc_start_failed');
+            }
+
+            $logger->info('OIDC start login redirect', [
+                'correlation_id' => $correlation_id,
+                'provider' => $provider,
+                'idp' => $idp,
+            ]);
+
+            wp_safe_redirect($auth_url);
+            exit;
+        }
+
+        $request = [
+            'state' => $_REQUEST['state'] ?? '',
+            'code' => $_REQUEST['code'] ?? '',
+            'error' => $_REQUEST['error'] ?? '',
+            'correlation_id' => $correlation_id,
+        ];
+
+        $result = $oidc->handleCallback($request, $provider_config);
+        if (is_wp_error($result)) {
+            $logger->error('OIDC callback failed', [
+                'correlation_id' => $correlation_id,
+                'provider' => $provider,
+                'error_code' => $result->get_error_code(),
+            ]);
+            $this->redirect_to_login_error($result->get_error_code());
+        }
+
+        $claims = $result['claims'];
+        $state_context = $result['state_context'];
+
+        $normalized = $userMapper->normalizeClaims($claims, $provider);
+        $valid = $userMapper->validateMandatoryClaims($normalized, $correlation_id);
+        if (is_wp_error($valid)) {
+            $this->redirect_to_login_error($valid->get_error_code());
+        }
+
+        $provider_config['last_id_token_acr'] = isset($claims['acr']) ? (string) $claims['acr'] : '';
+        $pluginOptions = get_option('wp-spid-cie-oidc_options', []);
+        $user = $authService->resolveOrProvisionUser($normalized, $provider_config, $pluginOptions, $correlation_id);
+
+        if (is_wp_error($user)) {
+            $logger->error('OIDC WP user resolve failed', [
+                'correlation_id' => $correlation_id,
+                'error_code' => $user->get_error_code(),
+            ]);
+            $this->redirect_to_login_error($user->get_error_code());
+        }
+
+        wp_set_current_user($user->ID);
+        wp_set_auth_cookie($user->ID, true);
+        do_action('wp_login', $user->user_login, $user);
+
+        $target = isset($state_context['target_url']) ? $state_context['target_url'] : home_url('/');
+        $target = $this->sanitize_internal_redirect($target);
+
+        $logger->info('OIDC login completed', [
+            'correlation_id' => $correlation_id,
+            'provider' => $provider,
+            'user_id' => $user->ID,
+        ]);
+
+        wp_safe_redirect($target);
+        exit;
+    }
+
+    private function resolve_redirect_target(): string {
+        $raw = isset($_GET['redirect_to']) ? wp_unslash($_GET['redirect_to']) : '';
+        if (empty($raw)) {
+            return home_url('/');
+        }
+
+        return $this->sanitize_internal_redirect($raw);
+    }
+
+    private function sanitize_internal_redirect(string $url): string {
+        $default = home_url('/');
+        $safe = wp_validate_redirect($url, $default);
+        $homeHost = wp_parse_url(home_url(), PHP_URL_HOST);
+        $targetHost = wp_parse_url($safe, PHP_URL_HOST);
+
+        if ($targetHost && $homeHost && strtolower($targetHost) !== strtolower($homeHost)) {
+            return $default;
+        }
+
+        return $safe;
+    }
+
+    private function redirect_to_login_error(string $code): void {
+        $url = add_query_arg([
+            'login' => 'failed',
+            'spid_cie_error' => sanitize_key($code),
+        ], wp_login_url());
+
+        wp_safe_redirect($url);
+        exit;
     }
 
     private static $buttons_printed = false;
@@ -185,6 +305,12 @@ class WP_SPID_CIE_OIDC_Public {
     public function print_login_buttons_on_login_page($arg = null) {
         if (self::$buttons_printed) return $arg;
         if (is_string($arg) && !empty($arg)) echo $arg;
+
+        if (!empty($_GET['spid_cie_error'])) {
+            $code = sanitize_key(wp_unslash($_GET['spid_cie_error']));
+            echo '<p class="message" style="border-left-color:#d63638;">' . esc_html__('Autenticazione SPID/CIE non completata. Riprova.', 'wp-spid-cie-oidc') . ' (' . esc_html($code) . ')</p>';
+        }
+
         echo $this->render_login_buttons();
         self::$buttons_printed = true;
         return null;
@@ -195,6 +321,12 @@ class WP_SPID_CIE_OIDC_Public {
         
         $spid_enabled = isset($options['spid_enabled']) && $options['spid_enabled'] === '1';
         $cie_enabled = isset($options['cie_enabled']) && $options['cie_enabled'] === '1';
+        $provider_mode = $options['provider_mode'] ?? 'both';
+        if ($provider_mode === 'spid_only') {
+            $cie_enabled = false;
+        } elseif ($provider_mode === 'cie_only') {
+            $spid_enabled = false;
+        }
         
         // Gestione Disclaimer
         $disclaimer_enabled = isset($options['disclaimer_enabled']) && $options['disclaimer_enabled'] === '1';
