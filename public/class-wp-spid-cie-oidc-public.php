@@ -58,6 +58,7 @@ class WP_SPID_CIE_OIDC_Public {
 		add_rewrite_rule('^\.well-known/openid-federation/?$', 'index.php?oidc_federation=config', 'top');
 		add_rewrite_rule('^\.wellknown/openid-federation/?$',   'index.php?oidc_federation=config', 'top'); // alias (senza "-")
 		add_rewrite_rule('^jwks.json/?$',                       'index.php?oidc_federation=jwks',   'top');
+		add_rewrite_rule('^resolve/?$',                         'index.php?oidc_federation=resolve','top');
 
         add_filter( 'query_vars', function( $vars ) {
             $vars[] = 'oidc_federation';
@@ -72,6 +73,7 @@ class WP_SPID_CIE_OIDC_Public {
 			if (strpos($requested_url, '/.well-known/openid-federation') !== false) return false;
 			if (strpos($requested_url, '/.wellknown/openid-federation') !== false) return false;
 			if (strpos($requested_url, '/jwks.json') !== false) return false;
+			if (strpos($requested_url, '/resolve') !== false) return false;
 			return $redirect_url;
 	}	
 
@@ -86,6 +88,8 @@ class WP_SPID_CIE_OIDC_Public {
 				$action = 'config';
 			} elseif ($path === '/jwks.json') {
 				$action = 'jwks';
+			} elseif ($path === '/resolve') {
+				$action = 'resolve';
 			} else {
 				return;
 			}
@@ -148,6 +152,16 @@ class WP_SPID_CIE_OIDC_Public {
 				} else {
 					echo (string) $jwks;
 				}
+				exit;
+			}
+
+			if ( $action === 'resolve' ) {
+				$sub = isset($_GET['sub']) ? esc_url_raw(wp_unslash($_GET['sub'])) : '';
+				$trust_anchor = isset($_GET['trust_anchor']) ? esc_url_raw(wp_unslash($_GET['trust_anchor'])) : '';
+				$jws = $client->getResolveResponse($sub, $trust_anchor);
+
+				header('Content-Type: application/resolve-response+jwt; charset=utf-8');
+				echo is_string($jws) ? $jws : (string) $jws;
 				exit;
 			}
 
