@@ -16,6 +16,9 @@ use SPID_CIE_OIDC_PHP\Core\Util;
 
 class WP_SPID_CIE_OIDC_Factory {
 
+    private static $runtime_services = null;
+    private static $provider_registry = null;
+
     public static function get_client() {
         $options = get_option('wp-spid-cie-oidc_options');
         
@@ -61,6 +64,10 @@ class WP_SPID_CIE_OIDC_Factory {
      * Runtime services for OIDC login callback flow (Milestone 1).
      */
     public static function get_runtime_services() {
+        if (is_array(self::$runtime_services)) {
+            return self::$runtime_services;
+        }
+
         $logger = new WP_SPID_CIE_OIDC_Logger('OIDC');
         $pkce = new WP_SPID_CIE_OIDC_PkceService();
         $store = new WP_SPID_CIE_OIDC_TransientStateNonceStore();
@@ -69,23 +76,31 @@ class WP_SPID_CIE_OIDC_Factory {
         $userMapper = new WP_SPID_CIE_OIDC_WpUserMapper($logger);
         $authService = new WP_SPID_CIE_OIDC_WpAuthService($logger);
 
-        return [
+        self::$runtime_services = [
             'logger' => $logger,
             'oidc_client' => $client,
             'user_mapper' => $userMapper,
             'auth_service' => $authService,
         ];
+
+        return self::$runtime_services;
     }
 
     /**
      * Provider registry with SPID/CIE profiles + discovery resolver.
      */
     public static function get_provider_registry() {
+        if (self::$provider_registry instanceof WP_SPID_CIE_OIDC_ProviderRegistry) {
+            return self::$provider_registry;
+        }
+
         $runtime = self::get_runtime_services();
         $logger = $runtime['logger'];
         $wrapper = self::get_client();
         $resolver = new WP_SPID_CIE_OIDC_DiscoveryResolver($logger);
-        return new WP_SPID_CIE_OIDC_ProviderRegistry($resolver, $wrapper);
+
+        self::$provider_registry = new WP_SPID_CIE_OIDC_ProviderRegistry($resolver, $wrapper);
+        return self::$provider_registry;
     }
 }
 
