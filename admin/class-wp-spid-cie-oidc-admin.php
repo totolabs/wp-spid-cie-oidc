@@ -52,6 +52,8 @@ class WP_SPID_CIE_OIDC_Admin {
     }
 
     public function create_admin_page() {
+        $current_tab = $this->get_current_tab();
+        $tabs = $this->get_admin_tabs();
         ?>
         <div class="wrap">
             <h1 class="wp-heading-inline">SPID & CIE OIDC Login (PNRR 1.4.4)</h1>
@@ -59,29 +61,48 @@ class WP_SPID_CIE_OIDC_Admin {
             
             <?php settings_errors(); ?>
 
+            <nav class="nav-tab-wrapper spid-tabs" aria-label="Sezioni configurazione SPID CIE OIDC">
+                <?php foreach ($tabs as $tab_key => $tab): ?>
+                    <?php $url = add_query_arg(['page' => $this->plugin_name, 'tab' => $tab_key], admin_url('options-general.php')); ?>
+                    <a href="<?php echo esc_url($url); ?>" class="nav-tab <?php echo $current_tab === $tab_key ? 'nav-tab-active' : ''; ?>">
+                        <?php echo esc_html($tab['label']); ?>
+                    </a>
+                <?php endforeach; ?>
+            </nav>
+
+            <p class="description spid-tab-help"><?php echo esc_html($tabs[$current_tab]['help']); ?></p>
+
             <form method="post" action="options.php">
                 <?php settings_fields( $this->plugin_name . '_options_group' ); ?>
+                <input type="hidden" name="<?php echo esc_attr($this->plugin_name . '_options[_current_tab]'); ?>" value="<?php echo esc_attr($current_tab); ?>" />
                 
                 <div class="spid-admin-wrap">
                     <div class="spid-main-col">
-                        
-                        <div class="spid-card">
-                            <?php do_settings_sections($this->plugin_name . '_ente'); ?>
-                        </div>
 
-                        <div class="spid-card">
-                            <?php do_settings_sections($this->plugin_name . '_keys'); ?>
-                        </div>
+                        <?php if ($current_tab === 'a_ente'): ?>
+                            <div class="spid-card">
+                                <?php do_settings_sections($this->plugin_name . '_ente'); ?>
+                            </div>
+                        <?php elseif ($current_tab === 'b_federazione'): ?>
+                            <div class="spid-card">
+                                <?php do_settings_sections($this->plugin_name . '_keys'); ?>
+                            </div>
+                        <?php elseif ($current_tab === 'c_provider'): ?>
+                            <div class="spid-card">
+                                <?php do_settings_sections($this->plugin_name . '_providers'); ?>
+                            </div>
+                        <?php elseif ($current_tab === 'd_disclaimer'): ?>
+                            <div class="spid-card">
+                                <?php do_settings_sections($this->plugin_name . '_disclaimer'); ?>
+                                <?php $this->render_disclaimer_preview(); ?>
+                            </div>
+                        <?php else: ?>
+                            <div class="spid-card">
+                                <?php $this->render_operational_help(); ?>
+                            </div>
+                        <?php endif; ?>
 
-                        <div class="spid-card">
-                            <?php do_settings_sections($this->plugin_name . '_providers'); ?>
-                        </div>
-
-                        <div class="spid-card">
-                            <?php do_settings_sections($this->plugin_name . '_disclaimer'); ?>
-                        </div>
-
-                        <?php submit_button('Salva Tutte le Impostazioni', 'primary large'); ?>
+                        <?php submit_button('Salva Impostazioni Tab Corrente', 'primary large'); ?>
                     </div>
 
                     <div class="spid-side-col">
@@ -176,6 +197,13 @@ class WP_SPID_CIE_OIDC_Admin {
 		  $this->plugin_name . '_keys',
 		  'keys_section',
 		  ['id' => 'spid_trust_anchor', 'desc' => 'URL Trust Anchor SPID (quando OIDC sarà operativo)', 'placeholder' => 'https://...']
+		);
+		add_settings_field(
+		  'trust_anchor_preview',
+		  'Trust anchor configurati (read-only)',
+		  array($this, 'render_trust_anchor_preview_field'),
+		  $this->plugin_name . '_keys',
+		  'keys_section'
 		);
 		add_settings_field(
 		  'cie_trust_mark_preprod',
@@ -289,6 +317,44 @@ class WP_SPID_CIE_OIDC_Admin {
         add_settings_field('disclaimer_text', 'Testo dell\'Avviso', array($this, 'render_textarea_field'), $this->plugin_name . '_disclaimer', 'disclaimer_section', 
             ['id' => 'disclaimer_text', 'default' => $default_msg, 'desc' => 'HTML consentito (es. &lt;strong&gt;, &lt;br&gt;).']
         );
+    }
+
+    private function get_admin_tabs(): array {
+        return [
+            'a_ente' => ['label' => 'A. Ente', 'help' => 'Configurazione anagrafica dell\'ente e trust anchor ufficiali.'],
+            'b_federazione' => ['label' => 'B. Federazione', 'help' => 'Chiavi, entity statement e dati operativi per il portale CIE/SPID.'],
+            'c_provider' => ['label' => 'C. Provider OIDC', 'help' => 'Modalità discovery, endpoint e policy di provisioning utenti.'],
+            'd_disclaimer' => ['label' => 'D. Disclaimer', 'help' => 'Messaggi informativi mostrati sopra i pulsanti di login.'],
+            'e_operativo' => ['label' => 'E. Operatività', 'help' => 'Shortcode, callback e checklist rapida di messa in esercizio.'],
+        ];
+    }
+
+    private function get_current_tab(): string {
+        $tabs = $this->get_admin_tabs();
+        $requested = isset($_GET['tab']) ? sanitize_key(wp_unslash($_GET['tab'])) : 'a_ente';
+        return isset($tabs[$requested]) ? $requested : 'a_ente';
+    }
+
+    private function render_disclaimer_preview(): void {
+        $options = get_option($this->plugin_name . '_options', []);
+        $default_msg = "⚠️ <strong>Avviso Tecnico:</strong><br>I servizi di accesso SPID e CIE sono in fase di <strong>aggiornamento programmato</strong>. Il login potrebbe essere temporaneamente non disponibile.";
+        $text = !empty($options['disclaimer_text']) ? (string) $options['disclaimer_text'] : $default_msg;
+
+        echo '<h3>Anteprima disclaimer</h3>';
+        echo '<div class="spid-disclaimer-preview">' . wp_kses_post($text) . '</div>';
+    }
+
+    private function render_operational_help(): void {
+        $shortcode = '[spid_cie_login]';
+        $callback = add_query_arg(['oidc_action' => 'callback', 'provider' => 'spid'], home_url('/'));
+
+        echo '<h2>Checklist rapida</h2>';
+        echo '<ol>';
+        echo '<li>Inserisci lo shortcode <code>' . esc_html($shortcode) . '</code> in una pagina pubblica.</li>';
+        echo '<li>Configura callback OIDC con URL <code>' . esc_html($callback) . '</code>.</li>';
+        echo '<li>Verifica endpoint federation: <code>' . esc_html(home_url('/.well-known/openid-federation')) . '</code>.</li>';
+        echo '</ol>';
+        echo '<p class="description">Compatibilità login: se il path standard di WordPress è nascosto (es. WPS Hide Login), lo shortcode resta il fallback supportato.</p>';
     }
 
     // --- CALLBACK RENDERING ---
@@ -431,6 +497,22 @@ class WP_SPID_CIE_OIDC_Admin {
 		echo '<p class="description"><strong>Nota:</strong> se rigeneri le chiavi, devi aggiornare questa chiave anche sul portale CIE.</p>';
 	}
 	
+	public function render_trust_anchor_preview_field() {
+		$options = get_option($this->plugin_name . '_options', []);
+		$rows = [
+			'CIE pre-produzione' => $options['cie_trust_anchor_preprod'] ?? '',
+			'CIE produzione' => $options['cie_trust_anchor_prod'] ?? '',
+			'SPID' => $options['spid_trust_anchor'] ?? '',
+		];
+
+		echo '<ul class="spid-readonly-list">';
+		foreach ($rows as $label => $url) {
+			echo '<li><strong>' . esc_html($label) . ':</strong> <code>' . esc_html($url !== '' ? $url : 'non impostato') . '</code></li>';
+		}
+		echo '</ul>';
+		echo '<p class="description">Valori mostrati in sola lettura per verifica rapida pre-invio al portale di federazione.</p>';
+	}
+
 	private function get_keys_dir_path(): string {
 		$upload_dir = wp_upload_dir();
 		return trailingslashit($upload_dir['basedir']) . 'spid-cie-oidc-keys';
@@ -515,52 +597,85 @@ class WP_SPID_CIE_OIDC_Admin {
     }
 
     public function sanitize_options( $input ) {
-        $new_input = [];
-        $text_fields = ['organization_name', 'ipa_code', 'fiscal_number', 'contacts_email', 'cie_trust_anchor_preprod', 'cie_trust_anchor_prod', 'spid_trust_anchor', 'spid_scope', 'cie_scope', 'spid_acr_values', 'cie_acr_values', 'min_loa'];
-        foreach ($text_fields as $f) {
-            if (isset($input[$f])) { $new_input[$f] = sanitize_text_field($input[$f]); }
+        $existing = get_option($this->plugin_name . '_options', []);
+        if (!is_array($existing)) {
+            $existing = [];
         }
+
+        $current_tab = isset($input['_current_tab']) ? sanitize_key($input['_current_tab']) : 'a_ente';
+        $allowed_by_tab = [
+            'a_ente' => ['organization_name', 'ipa_code', 'fiscal_number', 'contacts_email', 'issuer_override', 'entity_id'],
+            'b_federazione' => ['cie_trust_anchor_preprod', 'cie_trust_anchor_prod', 'spid_trust_anchor', 'cie_trust_mark_preprod', 'cie_trust_mark_prod'],
+            'c_provider' => [
+                'spid_enabled', 'cie_enabled', 'spid_test_env', 'provider_mode', 'discovery_mode', 'default_role', 'auto_provisioning', 'min_loa',
+                'spid_issuer', 'cie_issuer', 'spid_scope', 'cie_scope', 'spid_acr_values', 'cie_acr_values',
+                'spid_authorization_endpoint', 'spid_token_endpoint', 'spid_jwks_uri', 'spid_userinfo_endpoint', 'spid_end_session_endpoint',
+                'cie_authorization_endpoint', 'cie_token_endpoint', 'cie_jwks_uri', 'cie_userinfo_endpoint', 'cie_end_session_endpoint'
+            ],
+            'd_disclaimer' => ['disclaimer_enabled', 'disclaimer_text'],
+            'e_operativo' => [],
+        ];
+
+        $new_input = $existing;
+        $allowed = $allowed_by_tab[$current_tab] ?? [];
+
+        $text_fields = ['organization_name', 'ipa_code', 'fiscal_number', 'contacts_email', 'spid_scope', 'cie_scope', 'spid_acr_values', 'cie_acr_values'];
+        foreach ($text_fields as $f) {
+            if (in_array($f, $allowed, true) && isset($input[$f])) {
+                $new_input[$f] = sanitize_text_field($input[$f]);
+            }
+        }
+
         $checkboxes = ['spid_enabled', 'cie_enabled', 'spid_test_env', 'disclaimer_enabled', 'auto_provisioning'];
         foreach ($checkboxes as $c) {
-            $new_input[$c] = (isset($input[$c]) && $input[$c] === '1') ? '1' : '0';
+            if (in_array($c, $allowed, true)) {
+                $new_input[$c] = (isset($input[$c]) && $input[$c] === '1') ? '1' : '0';
+            }
         }
-        if (isset($input['disclaimer_text'])) {
+
+        if (in_array('disclaimer_text', $allowed, true) && isset($input['disclaimer_text'])) {
             $new_input['disclaimer_text'] = wp_kses_post($input['disclaimer_text']);
         }
-		// Trust Mark (JWT) - meglio non passarli in wp_kses_post
-		$tm_fields = ['cie_trust_mark_preprod', 'cie_trust_mark_prod'];
-		foreach ($tm_fields as $f) {
-			if (isset($input[$f])) {
-				// sanitize_textarea_field va bene (rimuove roba strana ma lascia caratteri JWT)
-				$new_input[$f] = trim( sanitize_textarea_field( $input[$f] ) );
-			}
-		}
+
+        $tm_fields = ['cie_trust_mark_preprod', 'cie_trust_mark_prod'];
+        foreach ($tm_fields as $f) {
+            if (in_array($f, $allowed, true) && isset($input[$f])) {
+                $new_input[$f] = trim(sanitize_textarea_field($input[$f]));
+            }
+        }
 
         $url_fields = [
-            'issuer_override',
-            'entity_id',
+            'issuer_override', 'entity_id',
+            'cie_trust_anchor_preprod', 'cie_trust_anchor_prod', 'spid_trust_anchor',
             'spid_issuer', 'cie_issuer',
             'spid_authorization_endpoint', 'spid_token_endpoint', 'spid_jwks_uri', 'spid_userinfo_endpoint', 'spid_end_session_endpoint',
             'cie_authorization_endpoint', 'cie_token_endpoint', 'cie_jwks_uri', 'cie_userinfo_endpoint', 'cie_end_session_endpoint'
         ];
         foreach ($url_fields as $f) {
-            if (isset($input[$f])) {
+            if (in_array($f, $allowed, true) && isset($input[$f])) {
                 $new_input[$f] = esc_url_raw(trim((string) $input[$f]));
             }
         }
 
-        $provider_mode = isset($input['provider_mode']) ? sanitize_key($input['provider_mode']) : 'both';
-        $new_input['provider_mode'] = in_array($provider_mode, ['both', 'spid_only', 'cie_only'], true) ? $provider_mode : 'both';
+        if (in_array('provider_mode', $allowed, true)) {
+            $provider_mode = isset($input['provider_mode']) ? sanitize_key($input['provider_mode']) : 'both';
+            $new_input['provider_mode'] = in_array($provider_mode, ['both', 'spid_only', 'cie_only'], true) ? $provider_mode : 'both';
+        }
 
-        $discovery_mode = isset($input['discovery_mode']) ? sanitize_key($input['discovery_mode']) : 'auto';
-        $new_input['discovery_mode'] = in_array($discovery_mode, ['auto', 'manual'], true) ? $discovery_mode : 'auto';
+        if (in_array('discovery_mode', $allowed, true)) {
+            $discovery_mode = isset($input['discovery_mode']) ? sanitize_key($input['discovery_mode']) : 'auto';
+            $new_input['discovery_mode'] = in_array($discovery_mode, ['auto', 'manual'], true) ? $discovery_mode : 'auto';
+        }
 
-        $loa = isset($input['min_loa']) ? sanitize_text_field($input['min_loa']) : 'SpidL2';
-        $new_input['min_loa'] = in_array($loa, ['SpidL1', 'SpidL2', 'SpidL3'], true) ? $loa : 'SpidL2';
+        if (in_array('min_loa', $allowed, true)) {
+            $loa = isset($input['min_loa']) ? sanitize_text_field($input['min_loa']) : 'SpidL2';
+            $new_input['min_loa'] = in_array($loa, ['SpidL1', 'SpidL2', 'SpidL3'], true) ? $loa : 'SpidL2';
+        }
 
-
-        $role = isset($input['default_role']) ? sanitize_key($input['default_role']) : get_option('default_role', 'subscriber');
-        $new_input['default_role'] = get_role($role) ? $role : get_option('default_role', 'subscriber');
+        if (in_array('default_role', $allowed, true)) {
+            $role = isset($input['default_role']) ? sanitize_key($input['default_role']) : get_option('default_role', 'subscriber');
+            $new_input['default_role'] = get_role($role) ? $role : get_option('default_role', 'subscriber');
+        }
 
         return $new_input;
     }

@@ -121,3 +121,23 @@ input.code {
     font-family: monospace;
     background: #f6f7f7;
 }
+.spid-tabs {
+    margin: 16px 0 8px;
+}
+
+.spid-tab-help {
+    margin-bottom: 14px;
+}
+
+.spid-disclaimer-preview {
+    background: #fff8e5;
+    border: 1px solid #faebcc;
+    color: #8a6d3b;
+    padding: 12px;
+    border-radius: 4px;
+}
+
+.spid-readonly-list code {
+    display: inline-block;
+    margin-top: 2px;
+}

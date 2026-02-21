@@ -366,6 +366,21 @@ class WP_SPID_CIE_OIDC_Public {
         exit;
     }
 
+
+    private function resolve_login_entry_url(): string {
+        if (function_exists('wp_login_url') && did_action('login_init')) {
+            return wp_login_url();
+        }
+
+        $request_uri = isset($_SERVER['REQUEST_URI']) ? (string) wp_unslash($_SERVER['REQUEST_URI']) : '';
+        if ($request_uri !== '') {
+            $candidate = home_url($request_uri);
+            return $this->sanitize_internal_redirect($candidate);
+        }
+
+        return home_url('/');
+    }
+
     private static $buttons_printed = false;
 
     public function print_login_buttons_on_login_page($arg = null) {
@@ -400,7 +415,7 @@ class WP_SPID_CIE_OIDC_Public {
 
         if ( ! $spid_enabled && ! $cie_enabled ) return '';
 
-        $base_url = home_url('/');
+        $base_url = $this->resolve_login_entry_url();
         $login_url_cie = add_query_arg(['oidc_action' => 'login', 'provider' => 'cie'], $base_url);
 
         if (!class_exists('WP_SPID_CIE_OIDC_Factory')) {
