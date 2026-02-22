@@ -326,8 +326,8 @@ class WP_SPID_CIE_OIDC_Admin {
             ['id' => 'disclaimer_text', 'default' => $default_msg, 'desc' => 'HTML consentito (es. &lt;strong&gt;, &lt;br&gt;).']
         );
 
-        // --- 5. SPID SAML (STEP 1) ---
-        add_settings_section('spid_saml_section', '5. SPID SAML (Step 1)', null, $this->plugin_name . '_saml');
+        // --- 5. SPID SAML (STEP 2) ---
+        add_settings_section('spid_saml_section', '5. SPID SAML (Step 2)', null, $this->plugin_name . '_saml');
         add_settings_field('spid_saml_enabled', 'Abilita SPID SAML', array($this, 'render_checkbox_field'), $this->plugin_name . '_saml', 'spid_saml_section', [
             'id' => 'spid_saml_enabled',
             'desc' => 'Attiva il modulo SPID SAML e i relativi endpoint metadata/ACS/SLS.'
@@ -361,7 +361,7 @@ class WP_SPID_CIE_OIDC_Admin {
             'c_provider' => ['label' => 'C. Provider OIDC', 'help' => 'Modalità discovery, endpoint e policy di provisioning utenti.'],
             'd_disclaimer' => ['label' => 'D. Disclaimer', 'help' => 'Messaggi informativi mostrati sopra i pulsanti di login.'],
             'e_operativo' => ['label' => 'E. Operatività', 'help' => 'Shortcode, callback e checklist rapida di messa in esercizio.'],
-            'f_spid_saml' => ['label' => 'F. SPID SAML', 'help' => 'Modulo SPID SAML (step 1): settings base ed endpoint tecnici placeholder.'],
+            'f_spid_saml' => ['label' => 'F. SPID SAML', 'help' => 'Modulo SPID SAML (step 2): validazione response, login/sessione e provisioning utenti.'],
         ];
     }
 
@@ -403,7 +403,7 @@ class WP_SPID_CIE_OIDC_Admin {
         echo '<li><strong>ACS:</strong> <code>' . esc_html($acs) . '</code></li>';
         echo '<li><strong>SLS:</strong> <code>' . esc_html($sls) . '</code></li>';
         echo '</ul>';
-        echo '<p class="description">Step 1: metadata XML placeholder + endpoint ACS/SLS con risposta TODO.</p>';
+        echo '<p class="description">Step 2: metadata + ACS con validazione base SAMLResponse, login WordPress e provisioning effettivo; SLS chiude la sessione locale.</p>';
     }
 
     // --- CALLBACK RENDERING ---
