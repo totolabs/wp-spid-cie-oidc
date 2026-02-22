@@ -100,9 +100,10 @@ class WP_SPID_CIE_OIDC_Admin {
                             <div class="spid-card">
                                 <?php $this->render_operational_help(); ?>
                             </div>
-                        <?php else: ?>
+                        <?php elseif ($current_tab === 'f_spid_saml'): ?>
                             <div class="spid-card">
                                 <?php do_settings_sections($this->plugin_name . '_saml'); ?>
+                            </div>
                         <?php else: ?>
                             <div class="spid-card">
                                 <?php $this->render_operational_help(); ?>
@@ -403,44 +404,6 @@ class WP_SPID_CIE_OIDC_Admin {
         echo '<li><strong>SLS:</strong> <code>' . esc_html($sls) . '</code></li>';
         echo '</ul>';
         echo '<p class="description">Step 1: metadata XML placeholder + endpoint ACS/SLS con risposta TODO.</p>';
-    }
-
-    private function get_admin_tabs(): array {
-        return [
-            'a_ente' => ['label' => 'A. Ente', 'help' => 'Configurazione anagrafica dell\'ente e trust anchor ufficiali.'],
-            'b_federazione' => ['label' => 'B. Federazione', 'help' => 'Chiavi, entity statement e dati operativi per il portale CIE/SPID.'],
-            'c_provider' => ['label' => 'C. Provider OIDC', 'help' => 'Modalità discovery, endpoint e policy di provisioning utenti.'],
-            'd_disclaimer' => ['label' => 'D. Disclaimer', 'help' => 'Messaggi informativi mostrati sopra i pulsanti di login.'],
-            'e_operativo' => ['label' => 'E. Operatività', 'help' => 'Shortcode, callback e checklist rapida di messa in esercizio.'],
-        ];
-    }
-
-    private function get_current_tab(): string {
-        $tabs = $this->get_admin_tabs();
-        $requested = isset($_GET['tab']) ? sanitize_key(wp_unslash($_GET['tab'])) : 'a_ente';
-        return isset($tabs[$requested]) ? $requested : 'a_ente';
-    }
-
-    private function render_disclaimer_preview(): void {
-        $options = get_option($this->plugin_name . '_options', []);
-        $default_msg = "⚠️ <strong>Avviso Tecnico:</strong><br>I servizi di accesso SPID e CIE sono in fase di <strong>aggiornamento programmato</strong>. Il login potrebbe essere temporaneamente non disponibile.";
-        $text = !empty($options['disclaimer_text']) ? (string) $options['disclaimer_text'] : $default_msg;
-
-        echo '<h3>Anteprima disclaimer</h3>';
-        echo '<div class="spid-disclaimer-preview">' . wp_kses_post($text) . '</div>';
-    }
-
-    private function render_operational_help(): void {
-        $shortcode = '[spid_cie_login]';
-        $callback = add_query_arg(['oidc_action' => 'callback', 'provider' => 'spid'], home_url('/'));
-
-        echo '<h2>Checklist rapida</h2>';
-        echo '<ol>';
-        echo '<li>Inserisci lo shortcode <code>' . esc_html($shortcode) . '</code> in una pagina pubblica.</li>';
-        echo '<li>Configura callback OIDC con URL <code>' . esc_html($callback) . '</code>.</li>';
-        echo '<li>Verifica endpoint federation: <code>' . esc_html(home_url('/.well-known/openid-federation')) . '</code>.</li>';
-        echo '</ol>';
-        echo '<p class="description">Compatibilità login: se il path standard di WordPress è nascosto (es. WPS Hide Login), lo shortcode resta il fallback supportato.</p>';
     }
 
     // --- CALLBACK RENDERING ---
