@@ -96,6 +96,13 @@ class WP_SPID_CIE_OIDC_Admin {
                                 <?php do_settings_sections($this->plugin_name . '_disclaimer'); ?>
                                 <?php $this->render_disclaimer_preview(); ?>
                             </div>
+                        <?php elseif ($current_tab === 'e_operativo'): ?>
+                            <div class="spid-card">
+                                <?php $this->render_operational_help(); ?>
+                            </div>
+                        <?php else: ?>
+                            <div class="spid-card">
+                                <?php do_settings_sections($this->plugin_name . '_saml'); ?>
                         <?php else: ?>
                             <div class="spid-card">
                                 <?php $this->render_operational_help(); ?>
@@ -317,6 +324,85 @@ class WP_SPID_CIE_OIDC_Admin {
         add_settings_field('disclaimer_text', 'Testo dell\'Avviso', array($this, 'render_textarea_field'), $this->plugin_name . '_disclaimer', 'disclaimer_section', 
             ['id' => 'disclaimer_text', 'default' => $default_msg, 'desc' => 'HTML consentito (es. &lt;strong&gt;, &lt;br&gt;).']
         );
+
+        // --- 5. SPID SAML (STEP 1) ---
+        add_settings_section('spid_saml_section', '5. SPID SAML (Step 1)', null, $this->plugin_name . '_saml');
+        add_settings_field('spid_saml_enabled', 'Abilita SPID SAML', array($this, 'render_checkbox_field'), $this->plugin_name . '_saml', 'spid_saml_section', [
+            'id' => 'spid_saml_enabled',
+            'desc' => 'Attiva il modulo SPID SAML e i relativi endpoint metadata/ACS/SLS.'
+        ]);
+        add_settings_field('spid_saml_entity_id', 'SPID SAML EntityID', array($this, 'render_text_field'), $this->plugin_name . '_saml', 'spid_saml_section', [
+            'id' => 'spid_saml_entity_id',
+            'placeholder' => 'https://demo.ente.it/spid/saml/metadata',
+            'desc' => 'EntityID del Service Provider SAML. Se vuoto usa Issuer/Identificativo componente.'
+        ]);
+        add_settings_field('spid_saml_auto_provisioning', 'Provisioning automatico utenti', array($this, 'render_checkbox_field'), $this->plugin_name . '_saml', 'spid_saml_section', [
+            'id' => 'spid_saml_auto_provisioning',
+            'desc' => 'Se attivo, crea utenti WordPress mancanti al primo login SPID SAML.'
+        ]);
+        add_settings_field('spid_saml_default_role', 'Ruolo default nuovi utenti', array($this, 'render_select_field'), $this->plugin_name . '_saml', 'spid_saml_section', [
+            'id' => 'spid_saml_default_role',
+            'options' => $this->get_role_options(),
+            'default' => get_option('default_role', 'subscriber'),
+            'desc' => 'Ruolo assegnato ai nuovi utenti creati via provisioning SPID SAML.'
+        ]);
+        add_settings_field('spid_saml_debug', 'Debug SPID SAML', array($this, 'render_checkbox_field'), $this->plugin_name . '_saml', 'spid_saml_section', [
+            'id' => 'spid_saml_debug',
+            'desc' => 'Abilita log diagnostici sicuri e header diagnostici sugli endpoint SAML.'
+        ]);
+        add_settings_field('spid_saml_endpoints_preview', 'Endpoint SPID SAML (read-only)', array($this, 'render_spid_saml_endpoints_preview'), $this->plugin_name . '_saml', 'spid_saml_section');
+    }
+
+    private function get_admin_tabs(): array {
+        return [
+            'a_ente' => ['label' => 'A. Ente', 'help' => 'Configurazione anagrafica dell\'ente e trust anchor ufficiali.'],
+            'b_federazione' => ['label' => 'B. Federazione', 'help' => 'Chiavi, entity statement e dati operativi per il portale CIE/SPID.'],
+            'c_provider' => ['label' => 'C. Provider OIDC', 'help' => 'Modalità discovery, endpoint e policy di provisioning utenti.'],
+            'd_disclaimer' => ['label' => 'D. Disclaimer', 'help' => 'Messaggi informativi mostrati sopra i pulsanti di login.'],
+            'e_operativo' => ['label' => 'E. Operatività', 'help' => 'Shortcode, callback e checklist rapida di messa in esercizio.'],
+            'f_spid_saml' => ['label' => 'F. SPID SAML', 'help' => 'Modulo SPID SAML (step 1): settings base ed endpoint tecnici placeholder.'],
+        ];
+    }
+
+    private function get_current_tab(): string {
+        $tabs = $this->get_admin_tabs();
+        $requested = isset($_GET['tab']) ? sanitize_key(wp_unslash($_GET['tab'])) : 'a_ente';
+        return isset($tabs[$requested]) ? $requested : 'a_ente';
+    }
+
+    private function render_disclaimer_preview(): void {
+        $options = get_option($this->plugin_name . '_options', []);
+        $default_msg = "⚠️ <strong>Avviso Tecnico:</strong><br>I servizi di accesso SPID e CIE sono in fase di <strong>aggiornamento programmato</strong>. Il login potrebbe essere temporaneamente non disponibile.";
+        $text = !empty($options['disclaimer_text']) ? (string) $options['disclaimer_text'] : $default_msg;
+
+        echo '<h3>Anteprima disclaimer</h3>';
+        echo '<div class="spid-disclaimer-preview">' . wp_kses_post($text) . '</div>';
+    }
+
+    private function render_operational_help(): void {
+        $shortcode = '[spid_cie_login]';
+        $callback = add_query_arg(['oidc_action' => 'callback', 'provider' => 'spid'], home_url('/'));
+
+        echo '<h2>Checklist rapida</h2>';
+        echo '<ol>';
+        echo '<li>Inserisci lo shortcode <code>' . esc_html($shortcode) . '</code> in una pagina pubblica.</li>';
+        echo '<li>Configura callback OIDC con URL <code>' . esc_html($callback) . '</code>.</li>';
+        echo '<li>Verifica endpoint federation: <code>' . esc_html(home_url('/.well-known/openid-federation')) . '</code>.</li>';
+        echo '</ol>';
+        echo '<p class="description">Compatibilità login: se il path standard di WordPress è nascosto (es. WPS Hide Login), lo shortcode resta il fallback supportato.</p>';
+    }
+
+    public function render_spid_saml_endpoints_preview() {
+        $metadata = home_url('/spid/saml/metadata');
+        $acs = home_url('/spid/saml/acs');
+        $sls = home_url('/spid/saml/sls');
+
+        echo '<ul class="spid-readonly-list">';
+        echo '<li><strong>Metadata:</strong> <code>' . esc_html($metadata) . '</code></li>';
+        echo '<li><strong>ACS:</strong> <code>' . esc_html($acs) . '</code></li>';
+        echo '<li><strong>SLS:</strong> <code>' . esc_html($sls) . '</code></li>';
+        echo '</ul>';
+        echo '<p class="description">Step 1: metadata XML placeholder + endpoint ACS/SLS con risposta TODO.</p>';
     }
 
     private function get_admin_tabs(): array {
@@ -614,6 +700,7 @@ class WP_SPID_CIE_OIDC_Admin {
             ],
             'd_disclaimer' => ['disclaimer_enabled', 'disclaimer_text'],
             'e_operativo' => [],
+            'f_spid_saml' => ['spid_saml_enabled', 'spid_saml_entity_id', 'spid_saml_auto_provisioning', 'spid_saml_default_role', 'spid_saml_debug'],
         ];
 
         $new_input = $existing;
@@ -626,7 +713,7 @@ class WP_SPID_CIE_OIDC_Admin {
             }
         }
 
-        $checkboxes = ['spid_enabled', 'cie_enabled', 'spid_test_env', 'disclaimer_enabled', 'auto_provisioning'];
+        $checkboxes = ['spid_enabled', 'cie_enabled', 'spid_test_env', 'disclaimer_enabled', 'auto_provisioning', 'spid_saml_enabled', 'spid_saml_auto_provisioning', 'spid_saml_debug'];
         foreach ($checkboxes as $c) {
             if (in_array($c, $allowed, true)) {
                 $new_input[$c] = (isset($input[$c]) && $input[$c] === '1') ? '1' : '0';
@@ -647,6 +734,7 @@ class WP_SPID_CIE_OIDC_Admin {
         $url_fields = [
             'issuer_override', 'entity_id',
             'cie_trust_anchor_preprod', 'cie_trust_anchor_prod', 'spid_trust_anchor',
+            'spid_saml_entity_id',
             'spid_issuer', 'cie_issuer',
             'spid_authorization_endpoint', 'spid_token_endpoint', 'spid_jwks_uri', 'spid_userinfo_endpoint', 'spid_end_session_endpoint',
             'cie_authorization_endpoint', 'cie_token_endpoint', 'cie_jwks_uri', 'cie_userinfo_endpoint', 'cie_end_session_endpoint'
@@ -675,6 +763,11 @@ class WP_SPID_CIE_OIDC_Admin {
         if (in_array('default_role', $allowed, true)) {
             $role = isset($input['default_role']) ? sanitize_key($input['default_role']) : get_option('default_role', 'subscriber');
             $new_input['default_role'] = get_role($role) ? $role : get_option('default_role', 'subscriber');
+        }
+
+        if (in_array('spid_saml_default_role', $allowed, true)) {
+            $role = isset($input['spid_saml_default_role']) ? sanitize_key($input['spid_saml_default_role']) : get_option('default_role', 'subscriber');
+            $new_input['spid_saml_default_role'] = get_role($role) ? $role : get_option('default_role', 'subscriber');
         }
 
         return $new_input;
