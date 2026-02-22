@@ -73,6 +73,10 @@ function run_wp_spid_cie_oidc() {
         $plugin_admin = new WP_SPID_CIE_OIDC_Admin( $plugin_name, $version );
     }
 
+    // Bootstrap runtime services once (OIDC client, mapper, auth, provider registry)
+    WP_SPID_CIE_OIDC_Factory::get_runtime_services();
+    WP_SPID_CIE_OIDC_Factory::get_provider_registry();
+
     // Avvia la parte Public (Login, Callback, Shortcodes, Endpoint API)
     $plugin_public = new WP_SPID_CIE_OIDC_Public( $plugin_name, $version );
 

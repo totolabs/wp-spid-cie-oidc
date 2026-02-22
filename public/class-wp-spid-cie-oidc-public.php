@@ -55,6 +55,9 @@ class WP_SPID_CIE_OIDC_Public {
     }
 
     public function setup_federation_endpoints() {
+		add_rewrite_rule('^spid/saml/metadata/?$',              'index.php?spid_saml_route=metadata', 'top');
+		add_rewrite_rule('^spid/saml/acs/?$',                   'index.php?spid_saml_route=acs',      'top');
+		add_rewrite_rule('^spid/saml/sls/?$',                   'index.php?spid_saml_route=sls',      'top');
 		add_rewrite_rule('^\.well-known/openid-federation/?$', 'index.php?oidc_federation=config', 'top');
 		add_rewrite_rule('^\.wellknown/openid-federation/?$',   'index.php?oidc_federation=config', 'top'); // alias (senza "-")
 		add_rewrite_rule('^jwks.json/?$',                       'index.php?oidc_federation=jwks',   'top');
@@ -62,6 +65,7 @@ class WP_SPID_CIE_OIDC_Public {
 
         add_filter( 'query_vars', function( $vars ) {
             $vars[] = 'oidc_federation';
+            $vars[] = 'spid_saml_route';
             $vars[] = 'oidc_action';
             $vars[] = 'provider';
             $vars[] = 'idp';
@@ -70,6 +74,9 @@ class WP_SPID_CIE_OIDC_Public {
     }
 	
 	public function disable_canonical_for_federation($redirect_url, $requested_url) {
+			if (strpos($requested_url, '/spid/saml/metadata') !== false) return false;
+			if (strpos($requested_url, '/spid/saml/acs') !== false) return false;
+			if (strpos($requested_url, '/spid/saml/sls') !== false) return false;
 			if (strpos($requested_url, '/.well-known/openid-federation') !== false) return false;
 			if (strpos($requested_url, '/.wellknown/openid-federation') !== false) return false;
 			if (strpos($requested_url, '/jwks.json') !== false) return false;
@@ -79,6 +86,23 @@ class WP_SPID_CIE_OIDC_Public {
 
     public function serve_federation_endpoints() {
 		global $wp_query;
+
+		$saml_route = $wp_query->get('spid_saml_route');
+		if (!is_string($saml_route) || $saml_route === '') {
+			$path = parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH);
+			$path = '/' . ltrim((string) $path, '/');
+			if ($path === '/spid/saml/metadata') {
+				$saml_route = 'metadata';
+			} elseif ($path === '/spid/saml/acs') {
+				$saml_route = 'acs';
+			} elseif ($path === '/spid/saml/sls') {
+				$saml_route = 'sls';
+			}
+		}
+
+		if (is_string($saml_route) && in_array($saml_route, ['metadata', 'acs', 'sls'], true)) {
+			$this->serve_spid_saml_route($saml_route);
+		}
 
 		$action = $wp_query->get('oidc_federation');
 		if ( ! $action ) {
@@ -203,6 +227,338 @@ class WP_SPID_CIE_OIDC_Public {
 			echo 'Errore OIDC Federation: ' . $e->getMessage();
 			exit;
 		}
+	}
+
+	private function serve_spid_saml_route(string $route): void {
+		$options = get_option($this->plugin_name . '_options', []);
+		$enabled = !empty($options['spid_saml_enabled']) && $options['spid_saml_enabled'] === '1';
+		$debug_enabled = !empty($options['spid_saml_debug']) && $options['spid_saml_debug'] === '1';
+
+		if (!$enabled) {
+			status_header(404);
+			header('Content-Type: text/plain; charset=utf-8');
+			echo 'Not found';
+			exit;
+		}
+
+		$method = isset($_SERVER['REQUEST_METHOD']) ? strtoupper((string) $_SERVER['REQUEST_METHOD']) : 'GET';
+		$content_length = isset($_SERVER['CONTENT_LENGTH']) ? (int) $_SERVER['CONTENT_LENGTH'] : 0;
+		if ($debug_enabled) {
+			@error_log('[wp-spid-cie-oidc saml] route=' . $route . ' method=' . $method . ' content_length=' . $content_length);
+		}
+
+		nocache_headers();
+		header('X-Content-Type-Options: nosniff');
+		if ($debug_enabled && defined('WP_DEBUG') && WP_DEBUG) {
+			header('X-SPIDCIE-SAML-Route: ' . $route);
+			header('X-SPIDCIE-SAML-Method: ' . $method);
+		}
+
+		if ($route === 'metadata') {
+			if ($method !== 'GET') {
+				status_header(405);
+				header('Allow: GET');
+				header('Content-Type: text/plain; charset=utf-8');
+				echo 'Method Not Allowed';
+				exit;
+			}
+			$this->serve_spid_saml_metadata($options);
+		}
+
+		if ($route === 'acs' && $method !== 'POST') {
+			status_header(405);
+			header('Allow: POST');
+			header('Content-Type: text/plain; charset=utf-8');
+			echo 'Method Not Allowed';
+			exit;
+		}
+
+		if ($route === 'sls' && !in_array($method, ['GET', 'POST'], true)) {
+			status_header(405);
+			header('Allow: GET, POST');
+			header('Content-Type: text/plain; charset=utf-8');
+			echo 'Method Not Allowed';
+			exit;
+		}
+
+		if ($route === 'acs') {
+			$this->serve_spid_saml_acs($options, $debug_enabled);
+		}
+
+		if ($route === 'sls') {
+			$this->serve_spid_saml_sls($debug_enabled);
+		}
+
+		status_header(404);
+		header('Content-Type: text/plain; charset=utf-8');
+		echo 'Not found';
+		exit;
+	}
+
+	private function serve_spid_saml_metadata(array $options): void {
+		$entity_id = isset($options['spid_saml_entity_id']) && $options['spid_saml_entity_id'] !== ''
+			? esc_url_raw((string) $options['spid_saml_entity_id'])
+			: (!empty($options['issuer_override']) ? esc_url_raw((string) $options['issuer_override']) : home_url('/'));
+
+		$acs_url = home_url('/spid/saml/acs');
+		$sls_url = home_url('/spid/saml/sls');
+		$organization_name = isset($options['organization_name']) ? sanitize_text_field((string) $options['organization_name']) : get_bloginfo('name');
+		$contacts_email = isset($options['contacts_email']) ? sanitize_email((string) $options['contacts_email']) : get_option('admin_email');
+		$ipa_code = isset($options['ipa_code']) ? sanitize_text_field((string) $options['ipa_code']) : '';
+		$fiscal_number = isset($options['fiscal_number']) ? sanitize_text_field((string) $options['fiscal_number']) : '';
+		$cert = $this->get_saml_signing_cert();
+		$authn_requests_signed = $cert !== '' ? 'true' : 'false';
+
+		status_header(200);
+		header('Content-Type: application/samlmetadata+xml; charset=utf-8');
+
+		echo '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
+		echo '<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" xmlns:ds="http://www.w3.org/2000/09/xmldsig#" xmlns:spid="https://spid.gov.it/saml-extensions" entityID="' . esc_attr($entity_id) . '">' . "\n";
+		echo '  <md:SPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol" AuthnRequestsSigned="' . esc_attr($authn_requests_signed) . '" WantAssertionsSigned="true">' . "\n";
+		if ($cert !== '') {
+			echo '    <md:KeyDescriptor use="signing">' . "\n";
+			echo '      <ds:KeyInfo>' . "\n";
+			echo '        <ds:X509Data><ds:X509Certificate>' . esc_html($cert) . '</ds:X509Certificate></ds:X509Data>' . "\n";
+			echo '      </ds:KeyInfo>' . "\n";
+			echo '    </md:KeyDescriptor>' . "\n";
+		}
+		echo '    <md:NameIDFormat>urn:oasis:names:tc:SAML:2.0:nameid-format:transient</md:NameIDFormat>' . "\n";
+		echo '    <md:AssertionConsumerService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="' . esc_url($acs_url) . '" index="0" isDefault="true" />' . "\n";
+		echo '    <md:SingleLogoutService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="' . esc_url($sls_url) . '" />' . "\n";
+		echo '    <md:AttributeConsumingService index="0">' . "\n";
+		echo '      <md:ServiceName xml:lang="it">Set base SPID</md:ServiceName>' . "\n";
+		echo '      <md:RequestedAttribute Name="name" />' . "\n";
+		echo '      <md:RequestedAttribute Name="familyName" />' . "\n";
+		echo '      <md:RequestedAttribute Name="fiscalNumber" />' . "\n";
+		echo '      <md:RequestedAttribute Name="email" />' . "\n";
+		echo '    </md:AttributeConsumingService>' . "\n";
+		echo '  </md:SPSSODescriptor>' . "\n";
+		echo '  <md:Organization>' . "\n";
+		echo '    <md:OrganizationName xml:lang="it">' . esc_html($organization_name) . '</md:OrganizationName>' . "\n";
+		echo '    <md:OrganizationDisplayName xml:lang="it">' . esc_html($organization_name) . '</md:OrganizationDisplayName>' . "\n";
+		echo '    <md:OrganizationURL xml:lang="it">' . esc_url(home_url('/')) . '</md:OrganizationURL>' . "\n";
+		echo '  </md:Organization>' . "\n";
+		echo '  <md:ContactPerson contactType="other">' . "\n";
+		echo '    <md:Extensions>' . "\n";
+		if ($ipa_code !== '') {
+			echo '      <spid:IPACode>' . esc_html($ipa_code) . '</spid:IPACode>' . "\n";
+		}
+		echo '      <spid:Public />' . "\n";
+		if ($fiscal_number !== '') {
+			echo '      <spid:FiscalCode>' . esc_html($fiscal_number) . '</spid:FiscalCode>' . "\n";
+		}
+		echo '    </md:Extensions>' . "\n";
+		if (is_email($contacts_email)) {
+			echo '    <md:EmailAddress>' . esc_html($contacts_email) . '</md:EmailAddress>' . "\n";
+		}
+		echo '  </md:ContactPerson>' . "\n";
+		echo '</md:EntityDescriptor>';
+		exit;
+	}
+
+
+	private function serve_spid_saml_acs(array $options, bool $debug_enabled): void {
+		if (!class_exists('WP_SPID_CIE_OIDC_Factory')) {
+			require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/class-wp-spid-cie-oidc-factory.php';
+		}
+
+		$runtime = WP_SPID_CIE_OIDC_Factory::get_runtime_services();
+		/** @var WP_SPID_CIE_OIDC_Logger $logger */
+		$logger = $runtime['logger'];
+		/** @var WP_SPID_CIE_OIDC_WpAuthService $authService */
+		$authService = $runtime['auth_service'];
+		$correlation_id = $logger->generateCorrelationId();
+
+		$samlResponseB64 = isset($_POST['SAMLResponse']) ? (string) wp_unslash($_POST['SAMLResponse']) : '';
+		if ($samlResponseB64 === '') {
+			$logger->error('SAML ACS missing SAMLResponse', ['correlation_id' => $correlation_id]);
+			$this->redirect_to_login_error('saml_missing_response');
+		}
+
+		$xmlRaw = base64_decode($samlResponseB64, true);
+		if ($xmlRaw === false || $xmlRaw === '') {
+			$logger->error('SAML ACS invalid base64 payload', ['correlation_id' => $correlation_id]);
+			$this->redirect_to_login_error('saml_invalid_payload');
+		}
+
+		libxml_use_internal_errors(true);
+		$dom = new DOMDocument();
+		$loaded = $dom->loadXML($xmlRaw, LIBXML_NONET | LIBXML_NOBLANKS);
+		if (!$loaded) {
+			$logger->error('SAML ACS invalid XML', ['correlation_id' => $correlation_id]);
+			$this->redirect_to_login_error('saml_invalid_xml');
+		}
+
+		$parsed = $this->parse_saml_response($dom);
+		if (is_wp_error($parsed)) {
+			$logger->error('SAML ACS response parsing failed', [
+				'correlation_id' => $correlation_id,
+				'error_code' => $parsed->get_error_code(),
+			]);
+			$this->redirect_to_login_error($parsed->get_error_code());
+		}
+
+		$claims = $parsed['claims'];
+		$provider_config = [
+			'provider' => 'spid',
+			'last_id_token_acr' => isset($claims['acr']) ? (string) $claims['acr'] : '',
+		];
+
+		$pluginOptions = get_option('wp-spid-cie-oidc_options', []);
+		$pluginOptions['auto_provisioning'] = (!empty($options['spid_saml_auto_provisioning']) && $options['spid_saml_auto_provisioning'] === '1') ? '1' : '0';
+		$pluginOptions['default_role'] = isset($options['spid_saml_default_role']) ? sanitize_key((string) $options['spid_saml_default_role']) : get_option('default_role', 'subscriber');
+
+		$identity = [
+			'provider' => 'spid',
+			'sub' => sanitize_text_field((string) ($claims['sub'] ?? '')),
+			'email' => sanitize_email((string) ($claims['email'] ?? '')),
+			'given_name' => sanitize_text_field((string) ($claims['given_name'] ?? '')),
+			'family_name' => sanitize_text_field((string) ($claims['family_name'] ?? '')),
+			'fiscal_code' => strtoupper(sanitize_text_field((string) ($claims['fiscal_code'] ?? ''))),
+			'mobile' => sanitize_text_field((string) ($claims['mobile'] ?? '')),
+		];
+
+		if ($identity['sub'] === '' && $identity['fiscal_code'] === '') {
+			$logger->error('SAML ACS missing identity keys', ['correlation_id' => $correlation_id]);
+			$this->redirect_to_login_error('saml_missing_identity');
+		}
+
+		$user = $authService->resolveOrProvisionUser($identity, $provider_config, $pluginOptions, $correlation_id);
+		if (is_wp_error($user)) {
+			$logger->error('SAML WP user resolve failed', [
+				'correlation_id' => $correlation_id,
+				'error_code' => $user->get_error_code(),
+			]);
+			$this->redirect_to_login_error($user->get_error_code());
+		}
+
+		wp_set_current_user($user->ID);
+		wp_set_auth_cookie($user->ID, true);
+		do_action('wp_login', $user->user_login, $user);
+
+		$relay_state = isset($_POST['RelayState']) ? (string) wp_unslash($_POST['RelayState']) : '';
+		$target = $relay_state !== '' ? $this->sanitize_internal_redirect($relay_state) : home_url('/');
+
+		if ($debug_enabled) {
+			$logger->info('SAML ACS login completed', [
+				'correlation_id' => $correlation_id,
+				'user_id' => $user->ID,
+				'has_fiscal_code' => $identity['fiscal_code'] !== '' ? '1' : '0',
+			]);
+		}
+
+		wp_safe_redirect($target);
+		exit;
+	}
+
+	private function parse_saml_response(DOMDocument $dom) {
+		$xp = new DOMXPath($dom);
+		$xp->registerNamespace('samlp', 'urn:oasis:names:tc:SAML:2.0:protocol');
+		$xp->registerNamespace('saml', 'urn:oasis:names:tc:SAML:2.0:assertion');
+
+		$root = $dom->documentElement;
+		if (!$root || $root->localName !== 'Response') {
+			return new WP_Error('saml_invalid_root', __('Autenticazione SPID/CIE non completata.', 'wp-spid-cie-oidc'));
+		}
+
+		$statusCode = $xp->evaluate('string(/samlp:Response/samlp:Status/samlp:StatusCode/@Value)');
+		if ($statusCode !== 'urn:oasis:names:tc:SAML:2.0:status:Success') {
+			return new WP_Error('saml_status_not_success', __('Autenticazione SPID/CIE non completata.', 'wp-spid-cie-oidc'));
+		}
+
+		$notBefore = $xp->evaluate('string(//saml:Assertion/saml:Conditions/@NotBefore)');
+		$notOnOrAfter = $xp->evaluate('string(//saml:Assertion/saml:Conditions/@NotOnOrAfter)');
+		$now = time();
+		if ($notBefore !== '' && strtotime($notBefore) > ($now + 120)) {
+			return new WP_Error('saml_not_yet_valid', __('Autenticazione SPID/CIE non completata.', 'wp-spid-cie-oidc'));
+		}
+		if ($notOnOrAfter !== '' && strtotime($notOnOrAfter) <= ($now - 120)) {
+			return new WP_Error('saml_expired', __('Autenticazione SPID/CIE non completata.', 'wp-spid-cie-oidc'));
+		}
+
+		$nameId = trim((string) $xp->evaluate('string(//saml:Assertion/saml:Subject/saml:NameID)'));
+		if ($nameId === '') {
+			$nameId = trim((string) $xp->evaluate('string(//saml:NameID)'));
+		}
+
+		$attrs = [];
+		foreach ($xp->query('//saml:AttributeStatement/saml:Attribute') as $attributeNode) {
+			if (!$attributeNode instanceof DOMElement) {
+				continue;
+			}
+			$name = $attributeNode->getAttribute('Name');
+			if ($name === '') {
+				continue;
+			}
+			$firstValue = '';
+			foreach ($attributeNode->getElementsByTagNameNS('urn:oasis:names:tc:SAML:2.0:assertion', 'AttributeValue') as $valNode) {
+				$firstValue = trim((string) $valNode->textContent);
+				if ($firstValue !== '') {
+					break;
+				}
+			}
+			$attrs[$name] = $firstValue;
+		}
+
+		$fiscal = $this->pick_first($attrs, ['fiscalNumber', 'fiscal_code', 'fiscalCode', 'cf']);
+		$email = $this->pick_first($attrs, ['email', 'mail']);
+		$given = $this->pick_first($attrs, ['name', 'givenName', 'given_name']);
+		$family = $this->pick_first($attrs, ['familyName', 'family_name', 'surname']);
+		$mobile = $this->pick_first($attrs, ['mobilePhone', 'mobile', 'phoneNumber']);
+		$acr = trim((string) $xp->evaluate('string(//saml:AuthnContextClassRef)'));
+
+		return [
+			'claims' => [
+				'sub' => $nameId !== '' ? $nameId : $fiscal,
+				'fiscal_code' => $fiscal,
+				'email' => $email,
+				'given_name' => $given,
+				'family_name' => $family,
+				'mobile' => $mobile,
+				'acr' => $acr,
+			],
+		];
+	}
+
+	private function pick_first(array $source, array $keys): string {
+		foreach ($keys as $key) {
+			if (!isset($source[$key])) {
+				continue;
+			}
+			$value = trim((string) $source[$key]);
+			if ($value !== '') {
+				return $value;
+			}
+		}
+
+		return '';
+	}
+
+	private function serve_spid_saml_sls(bool $debug_enabled): void {
+		if (is_user_logged_in()) {
+			wp_logout();
+		}
+
+		status_header(200);
+		header('Content-Type: text/plain; charset=utf-8');
+		echo $debug_enabled ? 'SPID SAML SLS OK (session closed)' : 'OK';
+		exit;
+	}
+
+	private function get_saml_signing_cert(): string {
+		$upload_dir = wp_upload_dir();
+		$cert_file = trailingslashit($upload_dir['basedir']) . 'spid-cie-oidc-keys/public.crt';
+		if (!file_exists($cert_file) || !is_readable($cert_file)) {
+			return '';
+		}
+
+		$cert = (string) file_get_contents($cert_file);
+		if ($cert === '') {
+			return '';
+		}
+
+		$cert = str_replace(["\r", "\n", '-----BEGIN CERTIFICATE-----', '-----END CERTIFICATE-----'], '', $cert);
+		return trim($cert);
 	}
 
     private function extract_jwt_payload($jwt) {
@@ -366,6 +722,21 @@ class WP_SPID_CIE_OIDC_Public {
         exit;
     }
 
+
+    private function resolve_login_entry_url(): string {
+        if (function_exists('wp_login_url') && did_action('login_init')) {
+            return wp_login_url();
+        }
+
+        $request_uri = isset($_SERVER['REQUEST_URI']) ? (string) wp_unslash($_SERVER['REQUEST_URI']) : '';
+        if ($request_uri !== '') {
+            $candidate = home_url($request_uri);
+            return $this->sanitize_internal_redirect($candidate);
+        }
+
+        return home_url('/');
+    }
+
     private static $buttons_printed = false;
 
     public function print_login_buttons_on_login_page($arg = null) {
@@ -400,7 +771,7 @@ class WP_SPID_CIE_OIDC_Public {
 
         if ( ! $spid_enabled && ! $cie_enabled ) return '';
 
-        $base_url = home_url('/');
+        $base_url = $this->resolve_login_entry_url();
         $login_url_cie = add_query_arg(['oidc_action' => 'login', 'provider' => 'cie'], $base_url);
 
         if (!class_exists('WP_SPID_CIE_OIDC_Factory')) {
